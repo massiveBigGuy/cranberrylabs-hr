@@ -1,0 +1,53 @@
+# Default config — checked into the repo. Production overrides via config/production.yaml
+# (gitignored) and CONFIG_PATH env var.
+
+server:
+  port: 3000
+  # Bind to localhost in dev; production should bind to the docker-internal interface
+  # so only the reverse proxy can reach the API. See §13 of the schema.
+  host: 127.0.0.1
+
+database:
+  path: ./data/cranberrylabs-hr.sqlite
+
+queue:
+  redis_url: redis://localhost:6379
+  concurrency: 2
+  retry_attempts: 2
+
+storage:
+  root: ./storage/applications
+
+llm:
+  default_adapter: anthropic    # 'anthropic' | 'ollama'
+  anthropic:
+    model: claude-haiku-4-5
+    max_tokens: 4000
+  ollama:
+    base_url: http://violet-admin.local:11434
+    model: llama3:70b
+
+scraper:
+  user_agent: "JobDashBot/1.0 (personal use)"
+  request_delay_ms: 2000
+  cron: "0 7 * * *"
+  filters:
+    target_keywords:
+      - sysadmin
+      - "systems administrator"
+      - "IT support"
+      - "field technician"
+      - "infrastructure engineer"
+    excluded_keywords:
+      - sales
+      - "account executive"
+    min_posted_date_days_ago: 1
+
+notifications:
+  on_queue_complete: true
+  channels: []
+
+# Auth: see §13. The API trusts forwarded headers from Authelia.
+# In dev, set auth.dev_bypass_user to skip the middleware reject.
+auth:
+  dev_bypass_user: null         # set to e.g. 'dev' to bypass in local dev

@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Runtime data
+data/
+storage/
+redis-data/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+config/production.yaml
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
