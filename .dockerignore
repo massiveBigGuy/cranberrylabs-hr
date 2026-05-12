@@ -1,0 +1,32 @@
+# Dependencies — rebuilt inside the image
+**/node_modules/
+
+# Build output — regenerated in the build stage
+**/dist/
+**/build/
+**/*.tsbuildinfo
+
+# Runtime data — must NEVER end up in the image
+data/
+storage/
+redis-data/
+
+# Secrets and local config
+.env
+.env.*
+config/production.yaml
+
+# VCS, editor, OS noise
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Logs
+*.log
+
+# Docs (not needed at runtime)
+README.md
+docs/

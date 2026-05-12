@@ -1,0 +1,54 @@
+# deploy/Caddyfile.snippet
+#
+# Add this block to your existing Caddyfile (the one that already handles
+# login.cranberrylabs.net, the main site, etc.). It mirrors §13 of
+# docs/schema.md.
+#
+# Assumes:
+#   - Authelia is reachable at login.cranberrylabs.net
+#   - The Caddy container is on the `cranberrylabs` docker network alongside
+#     the `cranberrylabs-hr` service
+#   - You already have TLS sorted for *.cranberrylabs.net (either Caddy's
+#     automatic ACME or wildcard certs); no special directives needed here
+
+hr.cranberrylabs.net {
+    # The route block forces sequential execution of these directives in the
+    # order they appear. WITHOUT this, Caddy's default directive ordering
+    # runs `forward_auth` BEFORE `request_header`, which would defeat the
+    # entire security purpose of the strip below.
+    route {
+        # SECURITY: strip any client-supplied Remote-* headers from the
+        # incoming request BEFORE forward_auth runs. Two reasons:
+        #
+        #   1. Defense in depth — even with forward_auth in front, this
+        #      eliminates any possibility of a client injecting their own
+        #      Remote-User: admin.
+        #
+        #   2. CVE-2026-30851: Caddy 2.10.0 through 2.11.1 has a bug where
+        #      `copy_headers` only sets the header conditionally (when the
+        #      auth service includes it in its response) but does NOT strip
+        #      a client-supplied version with the same name. Fixed in
+        #      Caddy 2.11.2. Stripping at the request level pre-empts the
+        #      bug entirely. On patched Caddy, forward_auth's own strip
+        #      handles this and these lines are a no-op safety net.
+        #      See: https://github.com/caddyserver/caddy/security/advisories/GHSA-7r4p-vjf4-gxv4
+        request_header -Remote-User
+        request_header -Remote-Groups
+        request_header -Remote-Email
+        request_header -Remote-Name
+
+        # Authelia forward_auth — every request is checked before being
+        # proxied to the API. On success, Authelia returns the Remote-*
+        # headers that the autheliaIdentity middleware reads.
+        forward_auth login.cranberrylabs.net {
+            uri /api/verify?rd=https://login.cranberrylabs.net
+            copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+        }
+
+        # Forward to the API container. SSE works through Caddy out of the
+        # box — no special flush_interval needed (Caddy v2 streams by
+        # default). The reverse_proxy directive preserves the long-lived
+        # connection /api/events relies on.
+        reverse_proxy cranberrylabs-hr:3000
+    }
+}

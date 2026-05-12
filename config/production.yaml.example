@@ -1,0 +1,28 @@
+# config/production.yaml
+#
+# This file is gitignored. Copy from default.yaml and override only what
+# differs in production. The server merges this on top of default.yaml at
+# startup (see api/src/config.ts).
+
+server:
+  # 0.0.0.0 is safe here because the container does NOT publish ports —
+  # only services on the docker `cranberrylabs` network can reach it,
+  # and only Caddy is on that network as a public entry point. See §13
+  # of docs/schema.md.
+  host: 0.0.0.0
+  port: 3000
+
+database:
+  path: /app/data/cranberrylabs-hr.sqlite
+
+queue:
+  # `hr-redis` is the service name from docker-compose.yml; Docker's
+  # internal DNS resolves it on the `cranberrylabs` network.
+  redis_url: redis://hr-redis:6379
+
+storage:
+  root: /app/storage/applications
+
+# No dev bypass in production — Authelia must front the API.
+auth:
+  dev_bypass_user: null

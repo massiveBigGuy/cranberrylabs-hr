@@ -53,9 +53,17 @@ export function loadConfig(): AppConfig {
   const defaultPath = path.resolve(__dirname, '../../config/default.yaml');
   const defaultDoc = yaml.load(fs.readFileSync(defaultPath, 'utf8')) as AppConfig;
 
-  // Optional override.
+  // Optional override. If CONFIG_PATH is set, the file MUST exist — silently
+  // falling back to defaults masks the common "I typo'd the filename in
+  // production" failure mode.
   const overridePath = process.env.CONFIG_PATH;
-  if (overridePath && fs.existsSync(overridePath)) {
+  if (overridePath) {
+    if (!fs.existsSync(overridePath)) {
+      throw new Error(
+        `CONFIG_PATH was set to ${overridePath} but no file exists there. ` +
+          `Either create the file or unset CONFIG_PATH to use defaults only.`,
+      );
+    }
     const overrideDoc = yaml.load(fs.readFileSync(overridePath, 'utf8')) as Partial<AppConfig>;
     return deepMerge(defaultDoc, overrideDoc);
   }

@@ -2,7 +2,7 @@
 
 Standalone job-discovery, tailored-document-generation, and application-tracking service.
 Lives at `hr.cranberrylabs.net`. Isolated from `cranberrylabs-api` and `cranberrylabs-web`
-— separate code, separate database, separate container. I really need a job.
+— separate code, separate database, separate container.
 
 See [`docs/schema.md`](docs/schema.md) for the full design.
 
@@ -34,7 +34,7 @@ This iteration scaffolds:
 
 Nothing scrapes, nothing generates. The skeleton compiles and runs.
 
-## Quickstart
+## Quickstart — local dev (no Docker)
 
 ```bash
 cd api
@@ -44,3 +44,21 @@ npm run dev
 curl http://localhost:3000/health
 curl -N http://localhost:3000/api/events    # SSE heartbeats
 ```
+
+For local dev, set `auth.dev_bypass_user: dev` in `config/default.yaml` so the
+API doesn't reject requests for missing `Remote-User`.
+
+## Quickstart — Docker deployment
+
+See [`deploy/DEPLOY.md`](deploy/DEPLOY.md) for the full step-by-step. Short
+version:
+
+```bash
+cp config/production.yaml.example config/production.yaml
+mkdir -p data storage redis-data
+docker compose build
+docker compose run --rm hr node /app/api/dist/services/db/migrate-cli.js
+docker compose up -d
+```
+
+Then paste `deploy/Caddyfile.snippet` into your Caddy config and reload.

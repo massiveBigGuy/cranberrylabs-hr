@@ -6,7 +6,7 @@ dist/
 build/
 *.tsbuildinfo
 
-# Runtime data
+# Runtime data — never commit user data
 data/
 storage/
 redis-data/

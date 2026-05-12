@@ -1,0 +1,70 @@
+# docker-compose.yml
+#
+# Two services:
+#   - hr       : the API (and SPA when built) — single container per §15
+#   - hr-redis : dedicated Redis for the BullMQ queue; isolated from any other
+#                Redis instance on the homelab
+#
+# No ports are published. The only way in is the reverse proxy (Caddy), which
+# joins the shared `cranberrylabs` network. See deploy/Caddyfile.snippet.
+#
+# If your existing shared network has a different name (e.g. `proxy`, `web`),
+# change `cranberrylabs` everywhere below to match — or rename the existing
+# network. The two services and the reverse proxy MUST be on the same network.
+
+services:
+  hr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cranberrylabs-hr:latest
+    container_name: cranberrylabs-hr
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - CONFIG_PATH=/app/config/production.yaml
+      - TZ=America/Toronto
+    volumes:
+      # SQLite file. Bind mount (not named volume) so it's easy to back up,
+      # inspect with `sqlite3` from the host, and survive `docker compose down -v`.
+      - ./data:/app/data
+      # Generated resumes + cover letters.
+      - ./storage:/app/storage
+      # Config is read-only inside the container.
+      - ./config:/app/config:ro
+    depends_on:
+      hr-redis:
+        condition: service_healthy
+    networks:
+      - cranberrylabs-hr_default
+    # Resource limits — modest, tune later. The scraper + LLM generation are
+    # the heaviest consumers; this leaves headroom for both.
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  hr-redis:
+    image: redis:7-alpine
+    container_name: cranberrylabs-hr-redis
+    restart: unless-stopped
+    # Persist queue state across restarts. BullMQ relies on Redis to track
+    # in-flight jobs — losing this on every restart would orphan applications
+    # mid-generation.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ./redis-data:/data
+    networks:
+      - cranberrylabs-hr_default
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+networks:
+  cranberrylabs-hr_default:
+    #external: false

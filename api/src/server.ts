@@ -1,3 +1,5 @@
+import path from 'node:path';
+import fs from 'node:fs';
 import express from 'express';
 import { loadConfig } from './config';
 import { openDatabase, closeDatabase } from './services/db';
@@ -37,6 +39,34 @@ async function main() {
     logger: createLogger('module'),
   };
   await loadModules(app, ctx);
+
+  // SPA serving. The web/ workspace builds into web/dist/ — once it exists,
+  // serve it as static assets and fall back to index.html for any non-/api/*
+  // path so client-side routing works. Until the SPA is built, expose a
+  // human-readable placeholder at / so hitting the bare domain in a browser
+  // doesn't 404 confusingly.
+  //
+  // Path resolution: in dev (tsx) __dirname is api/src/. In prod (compiled)
+  // it's api/dist/. Either way, web/dist is two levels up + web/dist.
+  const spaDir = path.resolve(__dirname, '../../web/dist');
+  if (fs.existsSync(spaDir)) {
+    log.info('serving SPA', { path: spaDir });
+    app.use(express.static(spaDir));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/')) return next();
+      res.sendFile(path.join(spaDir, 'index.html'));
+    });
+  } else {
+    log.info('no SPA build found; serving placeholder', { expected: spaDir });
+    app.get('/', (_req, res) => {
+      res
+        .type('text/plain')
+        .send(
+          'cranberrylabs-hr is running. The SPA has not been built yet.\n' +
+            'API is available under /api/*.\n',
+        );
+    });
+  }
 
   // Last-resort error handler — keeps an unhandled exception from killing the
   // response stream and leaving the client hanging.
