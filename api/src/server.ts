@@ -48,23 +48,48 @@ async function main() {
   //
   // Path resolution: in dev (tsx) __dirname is api/src/. In prod (compiled)
   // it's api/dist/. Either way, web/dist is two levels up + web/dist.
-  const spaDir = path.resolve(__dirname, '../../web/dist');
-  if (fs.existsSync(spaDir)) {
+  //
+  // The existence check looks for index.html specifically rather than the
+  // directory, because the Dockerfile pre-creates an empty web/dist/ so the
+  // build doesn't need a conditional COPY. An empty dir would fool a
+  // directory-only check and route requests to a non-existent index.html.
+  const spaIndex = path.resolve(__dirname, '../../web/dist/index.html');
+  const spaDir = path.dirname(spaIndex);
+  if (fs.existsSync(spaIndex)) {
     log.info('serving SPA', { path: spaDir });
     app.use(express.static(spaDir));
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api/')) return next();
-      res.sendFile(path.join(spaDir, 'index.html'));
+      res.sendFile(spaIndex);
     });
   } else {
-    log.info('no SPA build found; serving placeholder', { expected: spaDir });
+    log.info('no SPA build found; serving placeholder', { expected: spaIndex });
+    // HTML rather than text/plain so browsers render this as a page (not as
+    // a downloadable file or — in Firefox's case — passed through the JSON
+    // viewer extension, which sandboxes the page under its own restrictive
+    // CSP and confuses dev-tools debugging).
     app.get('/', (_req, res) => {
-      res
-        .type('text/plain')
-        .send(
-          'cranberrylabs-hr is running. The SPA has not been built yet.\n' +
-            'API is available under /api/*.\n',
-        );
+      res.type('text/html').send(
+        `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>cranberrylabs-hr</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; color: #ddd; background: #1a1a1a; }
+      code { background: #2a2a2a; padding: 0.1em 0.3em; border-radius: 3px; }
+      a { color: #6cf; }
+    </style>
+  </head>
+  <body>
+    <h1>cranberrylabs-hr</h1>
+    <p>The API is running. The SPA has not been built yet — that's build-order step 3.</p>
+    <p>API endpoints are available under <code>/api/*</code>.</p>
+    <p>Liveness probe: <a href="/health">/health</a></p>
+  </body>
+</html>
+`,
+      );
     });
   }
 
