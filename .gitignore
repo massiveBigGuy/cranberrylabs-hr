@@ -4,6 +4,7 @@ node_modules/
 # Build output
 dist/
 build/
+deploy/
 *.tsbuildinfo
 
 # Runtime data — never commit user data
