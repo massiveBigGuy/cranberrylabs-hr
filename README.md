@@ -2,7 +2,7 @@
 
 Standalone job-discovery, tailored-document-generation, and application-tracking service.
 Lives at `hr.cranberrylabs.net`. Isolated from `cranberrylabs-api` and `cranberrylabs-web`
-— separate code, separate database, separate container.
+— separate code, separate database, separate container. I really need a job.
 
 See [`docs/schema.md`](docs/schema.md) for the full design.
 
