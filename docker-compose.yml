@@ -38,7 +38,7 @@ services:
       hr-redis:
         condition: service_healthy
     networks:
-      - cranberrylabs
+      - cranberrylabs-hr_default
     # Resource limits — modest, tune later. The scraper + LLM generation are
     # the heaviest consumers; this leaves headroom for both.
     deploy:
@@ -57,7 +57,7 @@ services:
     volumes:
       - ./redis-data:/data
     networks:
-      - cranberrylabs
+      - cranberrylabs-hr_default
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -66,8 +66,8 @@ services:
       start_period: 5s
 
 networks:
-  cranberrylabs:
+  cranberrylabs-hr_default:
     # Set to `true` if the network is created by another stack (e.g. the proxy
     # stack). Set to `false` (or remove `external`) to let this compose file
     # own the network.
-    external: true
+    #external: true
