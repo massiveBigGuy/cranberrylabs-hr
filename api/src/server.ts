@@ -8,6 +8,7 @@ import { sseHandler } from './services/sse/handler';
 import { makeAutheliaIdentity } from './middleware/authelia';
 import { loadModules } from './modules/loader';
 import type { AppContext } from './modules/types';
+import { ServiceRegistry } from './modules/services-registry';
 
 const log = createLogger('server');
 
@@ -37,8 +38,9 @@ async function main() {
     db,
     config,
     logger: createLogger('module'),
+    services: new ServiceRegistry(),
   };
-  await loadModules(app, ctx);
+  const loaded = await loadModules(app, ctx);
 
   // SPA serving. The web/ workspace builds into web/dist/ — once it exists,
   // serve it as static assets and fall back to index.html for any non-/api/*
@@ -113,17 +115,28 @@ async function main() {
     log.info('listening', { host: config.server.host, port: config.server.port });
   });
 
-  const shutdown = (signal: string) => {
+  const shutdown = async (signal: string) => {
     log.info('shutdown', { signal });
-    server.close(() => {
-      closeDatabase();
-      process.exit(0);
-    });
-    // Force exit if close hangs (long-lived SSE connections, mostly).
-    setTimeout(() => process.exit(1), 5_000).unref();
+    // Stop accepting new HTTP requests immediately.
+    server.close();
+    // Drain workers and stop cron. BullMQ awaits in-flight jobs.
+    try {
+      await loaded.shutdown();
+    } catch (err) {
+      log.error('module shutdown failed', { message: (err as Error).message });
+    }
+    closeDatabase();
+    process.exit(0);
   };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => {
+    void shutdown('SIGINT');
+    // Force exit if shutdown hangs longer than 10s (long-lived SSE, stuck job).
+    setTimeout(() => process.exit(1), 10_000).unref();
+  });
+  process.on('SIGTERM', () => {
+    void shutdown('SIGTERM');
+    setTimeout(() => process.exit(1), 10_000).unref();
+  });
 }
 
 main().catch((err) => {

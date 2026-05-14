@@ -9,7 +9,8 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
-    "migrate": "tsx src/services/db/migrate-cli.ts"
+    "migrate": "tsx src/services/db/migrate-cli.ts",
+    "smoke:workday": "tsx src/scripts/smoke-workday.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

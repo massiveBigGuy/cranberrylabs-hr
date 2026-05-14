@@ -20,8 +20,8 @@ services:
     image: cranberrylabs-hr:latest
     container_name: cranberrylabs-hr
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     environment:
       - NODE_ENV=production
       - CONFIG_PATH=/app/config/production.yaml
@@ -38,7 +38,7 @@ services:
       hr-redis:
         condition: service_healthy
     networks:
-      - cranberrylabs-hr_default
+      - cranberrylabs
     # Resource limits — modest, tune later. The scraper + LLM generation are
     # the heaviest consumers; this leaves headroom for both.
     deploy:
@@ -57,7 +57,7 @@ services:
     volumes:
       - ./redis-data:/data
     networks:
-      - cranberrylabs-hr_default
+      - cranberrylabs
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -66,5 +66,8 @@ services:
       start_period: 5s
 
 networks:
-  cranberrylabs-hr_default:
-    #external: false
+  cranberrylabs:
+    # Set to `true` if the network is created by another stack (e.g. the proxy
+    # stack). Set to `false` (or remove `external`) to let this compose file
+    # own the network.
+    external: true

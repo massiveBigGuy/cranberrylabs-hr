@@ -1,46 +1,211 @@
-import { Router } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
+import type { Queue } from 'bullmq';
+import type { AppContext } from '../types';
+import { SourcesRepo, type Platform } from './repo';
+import { parseWorkdayUrl } from '../scraper/url-parser';
+import type { ScrapeJobData } from '../scraper/worker';
+import { ScrapeRunsRepo } from '../scraper/repo-runs';
 
 /**
- * Routes from §4 of the schema:
- *
- *   GET    /api/sources
- *   POST   /api/sources
- *   GET    /api/sources/:id
- *   PATCH  /api/sources/:id
- *   DELETE /api/sources/:id
- *   POST   /api/sources/:id/scrape
- *   GET    /api/sources/:id/runs
- *
- * Stubbed to 501 in step 1 — the module's purpose right now is to prove the
- * loader/migrations/router contract end-to-end. Real handlers land in
- * build-order step 2 once the scraper module exists to back them.
+ * Build the sources router. The queue is passed in so the route handler
+ * can enqueue scrape jobs; the queue itself is owned by the scraper
+ * module's init hook and shared via the registry's wiring step.
  */
-export const router: Router = Router();
+export function buildSourcesRouter(
+  ctx: AppContext,
+  getScrapeQueue: () => Queue<ScrapeJobData>,
+): Router {
+  const router = Router();
+  const sources = new SourcesRepo(ctx.db);
+  const runs = new ScrapeRunsRepo(ctx.db);
 
-router.get('/', (_req, res) => {
-  res.status(501).json({ error: 'not_implemented', step: 'build-order step 2' });
-});
+  /**
+   * GET /api/sources — list all configured sources.
+   */
+  router.get('/', (_req, res) => {
+    res.json({ sources: sources.list() });
+  });
 
-router.post('/', (_req, res) => {
-  res.status(501).json({ error: 'not_implemented', step: 'build-order step 2' });
-});
+  /**
+   * POST /api/sources — add a new source. Validates the URL synchronously;
+   * if it's a Workday URL it's normalized to the canonical form. On
+   * success, enqueues a probe job — caller doesn't wait for the probe.
+   *
+   * Body: { company_name, platform, tenant_url, search_params? }
+   */
+  router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { company_name, platform, tenant_url, search_params } = req.body ?? {};
+      const v = validateNewSource({ company_name, platform, tenant_url });
+      if (!v.ok) {
+        res.status(400).json({ error: v.error });
+        return;
+      }
+      if (sources.findByTenantUrl(v.tenant_url)) {
+        res.status(409).json({ error: 'a source with this tenant_url already exists' });
+        return;
+      }
 
-router.get('/:id', (_req, res) => {
-  res.status(501).json({ error: 'not_implemented', step: 'build-order step 2' });
-});
+      const row = sources.insert({
+        company_name: v.company_name,
+        platform: v.platform,
+        tenant_url: v.tenant_url,
+        search_params: search_params ?? null,
+      });
 
-router.patch('/:id', (_req, res) => {
-  res.status(501).json({ error: 'not_implemented', step: 'build-order step 2' });
-});
+      await getScrapeQueue().add('probe', { source_id: row.id, mode: 'probe' });
 
-router.delete('/:id', (_req, res) => {
-  res.status(501).json({ error: 'not_implemented', step: 'build-order step 2' });
-});
+      res.status(201).json({ source: row, probe_status: 'pending' });
+    } catch (err) {
+      next(err);
+    }
+  });
 
-router.post('/:id/scrape', (_req, res) => {
-  res.status(501).json({ error: 'not_implemented', step: 'build-order step 2' });
-});
+  router.get('/:id', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const row = sources.get(id);
+    if (!row) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json({ source: row });
+  });
 
-router.get('/:id/runs', (_req, res) => {
-  res.status(501).json({ error: 'not_implemented', step: 'build-order step 2' });
-});
+  router.patch('/:id', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    if (!sources.get(id)) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const { company_name, enabled, search_params } = req.body ?? {};
+    const updated = sources.update(id, {
+      ...(company_name !== undefined && { company_name }),
+      ...(enabled !== undefined && { enabled: !!enabled }),
+      ...(search_params !== undefined && { search_params }),
+    });
+    res.json({ source: updated });
+  });
+
+  router.delete('/:id', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const removed = sources.delete(id);
+    if (!removed) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.status(204).end();
+  });
+
+  router.post('/:id/scrape', async (req, res, next) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: 'invalid id' });
+        return;
+      }
+      const source = sources.get(id);
+      if (!source) {
+        res.status(404).json({ error: 'not found' });
+        return;
+      }
+      const job = await getScrapeQueue().add('listing', {
+        source_id: id,
+        mode: 'listing',
+      });
+      res.status(202).json({ accepted: true, queue_job_id: job.id, source_id: id });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/:id/test', async (req, res, next) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: 'invalid id' });
+        return;
+      }
+      const source = sources.get(id);
+      if (!source) {
+        res.status(404).json({ error: 'not found' });
+        return;
+      }
+      const job = await getScrapeQueue().add('probe', { source_id: id, mode: 'probe' });
+      res.status(202).json({ accepted: true, queue_job_id: job.id });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:id/runs', (req, res) => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    if (!sources.get(id)) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const limit = Math.min(Number(req.query.limit ?? 20), 100);
+    res.json({ runs: runs.recentForSource(id, limit) });
+  });
+
+  return router;
+}
+
+// --- helpers ------------------------------------------------------------
+
+function parseId(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+interface ValidatedInput {
+  company_name: string;
+  platform: Platform;
+  tenant_url: string;
+}
+
+type ValidationResult =
+  | { ok: true; company_name: string; platform: Platform; tenant_url: string }
+  | { ok: false; error: string };
+
+function validateNewSource(input: Partial<ValidatedInput>): ValidationResult {
+  if (typeof input.company_name !== 'string' || !input.company_name.trim()) {
+    return { ok: false, error: 'company_name is required' };
+  }
+  if (typeof input.platform !== 'string') {
+    return { ok: false, error: 'platform is required' };
+  }
+  const platform = input.platform.toLowerCase() as Platform;
+  if (!['workday', 'greenhouse', 'lever', 'icims', 'custom'].includes(platform)) {
+    return { ok: false, error: `unsupported platform '${input.platform}'` };
+  }
+  if (typeof input.tenant_url !== 'string' || !input.tenant_url.trim()) {
+    return { ok: false, error: 'tenant_url is required' };
+  }
+  if (platform === 'workday') {
+    const parsed = parseWorkdayUrl(input.tenant_url);
+    if (!parsed.ok) return { ok: false, error: `invalid workday URL: ${parsed.error}` };
+  }
+  return {
+    ok: true,
+    company_name: input.company_name.trim(),
+    platform,
+    tenant_url: input.tenant_url.trim(),
+  };
+}
