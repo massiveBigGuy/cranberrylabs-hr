@@ -52,27 +52,26 @@ RUN apt-get update \
 # Match the userid pattern used elsewhere in the homelab if you have one;
 # 1000 is a sensible default. Owns /app so writes to data/ and storage/
 # (which will be bind-mounted) work without chmod gymnastics.
-RUN useradd --create-home --uid 1000 --shell /bin/bash hr
 
 WORKDIR /app
 
 # Copy compiled output and pruned node_modules from the build stage.
-COPY --from=build --chown=hr:hr /build/api/node_modules ./api/node_modules
-COPY --from=build --chown=hr:hr /build/api/dist ./api/dist
-COPY --chown=hr:hr api/package.json ./api/package.json
+COPY --from=build --chown=1000:1000 /build/api/node_modules ./api/node_modules
+COPY --from=build --chown=1000:1000 /build/api/dist ./api/dist
+COPY --chown=1000:1000 api/package.json ./api/package.json
 
 # Config and (eventually) the built SPA. The SPA dir may be empty in early
 # steps — the server checks fs.existsSync before serving.
-COPY --chown=hr:hr config ./config
+COPY --chown=1000:1000 config ./config
 # `web/dist` is copied conditionally: COPY fails if the source doesn't exist,
 # so we create an empty placeholder dir first.
-RUN mkdir -p /app/web/dist && chown -R hr:hr /app/web
+RUN mkdir -p /app/web/dist && chown -R 1000:1000 /app/web
 
 # Mountpoints for the persistent volumes. Pre-creating them with correct
 # ownership saves a permissions-debugging session on first run.
-RUN mkdir -p /app/data /app/storage && chown -R hr:hr /app/data /app/storage
+RUN mkdir -p /app/data /app/storage && chown -R 1000:1000 /app/data /app/storage
 
-USER hr
+USER 1000
 ENV NODE_ENV=production \
     CONFIG_PATH=/app/config/production.yaml
 
