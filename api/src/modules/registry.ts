@@ -5,18 +5,23 @@
  * the registry".
  *
  * ORDER MATTERS for migrations: a module's migrations run in the order its
- * module appears here. The `jobs` table (scraper module) has a FK on
- * `sources(id)`, so sources must come before scraper.
+ * module appears here.
+ *   - sources owns the `sources` table
+ *   - scraper owns `jobs` (FK on sources) and `scrape_runs`
+ *   - jobs owns `tags` and `job_tags` (FK on jobs)
+ *
+ * So: sources → scraper → jobs.
  */
 import type { Module } from './types';
 import { sourcesModule } from './sources';
 import { scraperModule } from './scraper';
+import { jobsModule } from './jobs';
 
 export const modules: Module[] = [
   sourcesModule,
   scraperModule,
+  jobsModule,
   // Future, added in their respective build-order steps:
-  //   jobsModule,           — step 3
   //   resumeModule,         — step 5
   //   applicationsModule,   — step 6
   //   notificationsModule,  — step 9

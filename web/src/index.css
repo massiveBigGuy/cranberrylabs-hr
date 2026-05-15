@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Base layer overrides. Anything heavier than a few rules lives in a
+ * component class. CSS variables here are read by tailwind.config.js's
+ * theme.extend.colors, which means we can theme by editing this one file.
+ */
+@layer base {
+  :root {
+    --cl-canvas: #0e0e10;
+    --cl-surface: #1a1a1d;
+    --cl-ink: #e4e4e7;
+    --cl-muted: #71717a;
+    --cl-accent: #b91c40;
+  }
+
+  body {
+    -webkit-font-smoothing: antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  }
+}
