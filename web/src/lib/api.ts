@@ -116,6 +116,7 @@ export interface Tag {
 export interface JobsListResponse {
   jobs: Job[];
   total: number;
+  total_unfiltered: number;
   offset: number;
   limit: number;
 }

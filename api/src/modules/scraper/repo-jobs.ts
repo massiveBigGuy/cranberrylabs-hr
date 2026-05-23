@@ -88,17 +88,24 @@ export class JobsRepo {
    *
    * Limit lets the cron task cap how many it processes per run, so it
    * spreads out polite request pacing rather than firing a thundering herd.
+   *
+   * Excludes jobs the sweep has given up on (detail_fetch_status =
+   * 'gave_up') and jobs that have hit the attempt ceiling — the
+   * attempt-count check is belt-and-suspenders against a status write
+   * that never landed. Either condition alone is sufficient.
    */
-  findMissingDescriptions(limit: number): JobRow[] {
+  findMissingDescriptions(limit: number, maxAttempts: number): JobRow[] {
     return this.db
       .prepare(
         `SELECT * FROM jobs
          WHERE description = ''
            AND status NOT IN ('dismissed', 'archived')
+           AND detail_fetch_status != 'gave_up'
+           AND detail_fetch_attempts < :maxAttempts
          ORDER BY discovered_at ASC
-         LIMIT ?`,
+         LIMIT :limit`,
       )
-      .all(limit) as JobRow[];
+      .all({ maxAttempts, limit }) as JobRow[];
   }
 
   updateDescription(
@@ -116,7 +123,9 @@ export class JobsRepo {
              hiring_manager_source = CASE
                WHEN hiring_manager IS NULL AND ? IS NOT NULL THEN 'jd'
                ELSE hiring_manager_source
-             END
+             END,
+             detail_fetch_status = 'ok',
+             detail_fetch_attempts = detail_fetch_attempts + 1
          WHERE id = ?`,
       )
       .run(description, descriptionHash, hiringManager, hiringManager, id);
@@ -128,4 +137,31 @@ export class JobsRepo {
       .get(sourceId) as { n: number };
     return row.n;
   }
+
+  /**
+   * Record a failed detail fetch: bump the attempt counter, and flip the
+   * job to 'gave_up' if it has now hit the ceiling. Returns the new
+   * attempt count and whether the job was given up, so the caller can
+   * log appropriately.
+   */
+  recordDetailFetchFailure(
+    id: number,
+    maxAttempts: number,
+  ): { attempts: number; gaveUp: boolean } {
+    const row = this.db
+      .prepare(
+        `UPDATE jobs SET detail_fetch_attempts = detail_fetch_attempts + 1
+         WHERE id = ? RETURNING detail_fetch_attempts`,
+      )
+      .get(id) as { detail_fetch_attempts: number };
+
+    const gaveUp = row.detail_fetch_attempts >= maxAttempts;
+    if (gaveUp) {
+      this.db
+        .prepare(`UPDATE jobs SET detail_fetch_status = 'gave_up' WHERE id = ?`)
+        .run(id);
+    }
+    return { attempts: row.detail_fetch_attempts, gaveUp };
+  }
+
 }

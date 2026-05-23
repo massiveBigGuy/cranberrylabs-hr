@@ -102,6 +102,18 @@ export function buildJobsRouter(ctx: AppContext): Router {
     res.json(result);
   });
 
+    // GET /api/jobs/stats — aggregate counts for the diagnostic panel.
+  // Registered before /:id so the literal 'stats' isn't swallowed by
+  // the :id wildcard.
+  router.get('/stats', (_req, res) => {
+    const keywordFilter = {
+      include: ctx.config.scraper?.filters?.target_keywords ?? [],
+      exclude: ctx.config.scraper?.filters?.excluded_keywords ?? [],
+    };
+    const stats = jobs.stats(keywordFilter);
+    res.json(stats);
+  });
+
   // GET /api/jobs/:id
   router.get('/:id', (req, res) => {
     const id = Number(req.params.id);

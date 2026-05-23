@@ -25,6 +25,7 @@ import { bus } from '../../services/sse/bus';
  * roughly 4 hours. Bump the cap or the cron frequency if that's too slow.
  */
 const PER_RUN_JOB_CAP = 300;
+const MAX_DETAIL_FETCH_ATTEMPTS = 5;
 
 export async function runDetailSweep(
   ctx: AppContext,
@@ -34,7 +35,7 @@ export async function runDetailSweep(
   const jobs = new JobsRepo(ctx.db);
   const requestDelayMs = ctx.config.scraper.request_delay_ms;
 
-  const candidates = jobs.findMissingDescriptions(PER_RUN_JOB_CAP);
+  const candidates = jobs.findMissingDescriptions(PER_RUN_JOB_CAP, MAX_DETAIL_FETCH_ATTEMPTS);
   if (candidates.length === 0) {
     ctx.logger.debug('detail sweep: nothing to do');
     return;
@@ -100,11 +101,24 @@ export async function runDetailSweep(
         processed++;
       } catch (err) {
         failed++;
-        ctx.logger.warn('detail fetch failed', {
-          job_id: job.id,
-          url: job.url,
-          error: (err as Error).message,
-        });
+        const message = (err as Error).message;
+        const result = jobs.recordDetailFetchFailure(job.id, MAX_DETAIL_FETCH_ATTEMPTS);
+
+        if (result.gaveUp) {
+          ctx.logger.warn('detail fetch: giving up after max attempts', {
+            job_id: job.id,
+            attempts: result.attempts,
+            url: job.url,
+            last_error: message,
+          });
+        } else {
+          ctx.logger.warn('detail fetch failed', {
+            job_id: job.id,
+            attempt: result.attempts,
+            url: job.url,
+            error: message,
+          });
+        }
       }
       if (requestDelayMs > 0) await sleep(requestDelayMs);
     }

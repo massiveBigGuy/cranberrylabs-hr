@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, qs, type JobsListResponse } from '../lib/api';
 import { JobList } from '../components/JobList';
 import { JobDetailDrawer } from '../components/JobDetailDrawer';
+import { JobStatsPanel } from '../components/JobStatsPanel';
 
 /**
  * The /jobs page. Default view is "today's filtered listings" per §8 of
@@ -83,6 +84,20 @@ export function JobsPage() {
           />
         </div>
       </div>
+
+      {/* Diagnostic panel */}
+      <JobStatsPanel />
+
+      {/* Result count*/}
+      {query.data && (
+        <div className="text-xs text-muted mb-3">
+          {query.data.total} of {query.data.total_unfiltered}{' '}
+          {query.data.total_unfiltered === 1 ? 'job' : 'jobs'}
+          {sinceDays !== null && ` · last ${sinceDays}d`}
+          {search && ` · "${search}"`}
+        </div>
+      )}
+
 
       {/* Result count */}
       {query.data && (
