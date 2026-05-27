@@ -98,16 +98,6 @@ export function JobsPage() {
         </div>
       )}
 
-
-      {/* Result count */}
-      {query.data && (
-        <div className="text-xs text-muted mb-3">
-          {query.data.total} {query.data.total === 1 ? 'job' : 'jobs'} matching
-          {sinceDays !== null && ` · last ${sinceDays}d`}
-          {search && ` · "${search}"`}
-        </div>
-      )}
-
       <JobList
         jobs={query.data?.jobs ?? []}
         onOpen={(id) => setSelectedId(id)}
