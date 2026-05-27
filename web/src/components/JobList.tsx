@@ -41,6 +41,7 @@ export function JobList({ jobs, onOpen, isLoading, isError }: JobListProps) {
             <th className="py-2 px-4 font-medium">Location</th>
             <th className="py-2 px-4 font-medium">Remote</th>
             <th className="py-2 px-4 font-medium">Posted</th>
+            <th className="py-2 px-4 font-medium">Fit</th>
             <th className="py-2 px-4 font-medium">Status</th>
           </tr>
         </thead>

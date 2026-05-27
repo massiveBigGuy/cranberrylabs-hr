@@ -5,6 +5,7 @@ import { getAdapter } from './adapters';
 import { SourcesRepo } from '../sources/repo';
 import { JobsRepo } from './repo-jobs';
 import { bus } from '../../services/sse/bus';
+import { computeFitScore } from '../jobs/fit-scorer';
 
 /**
  * Phase-2 sweep: walk jobs that have no description yet and fetch each one's
@@ -92,6 +93,14 @@ export async function runDetailSweep(
           detail.description_hash,
           detail.hiring_manager ?? null,
         );
+        const signals = ctx.config.scraper?.filters?.target_keywords ?? [];
+        const excludes = ctx.config.scraper?.filters?.excluded_keywords ?? [];
+        const fit = computeFitScore(
+          { title: job.title, description: detail.description },
+          signals,
+          excludes,
+        );
+        jobs.updateFitScore(job.id, fit.score, JSON.stringify(fit.reasons));
         bus.publish('job.discovered', {
           phase: 'detail',
           job_id: job.id,

@@ -2,6 +2,8 @@ import type { Module, AppContext } from '../types';
 import { Router } from 'express';
 import { migrations } from './migrations';
 import { buildJobsRouter } from './router';
+import { JobsRepo } from './repo';
+import { computeFitScore } from './fit-scorer';
 
 /**
  * The `jobs` module — read/filter/tag/dismiss jobs that the scraper has
@@ -26,6 +28,22 @@ export const jobsModule: Module = {
   scheduledTasks: [],
   init: async (ctx: AppContext) => {
     jobsModule.router = buildJobsRouter(ctx);
+
+    // Backfill fit scores for any jobs that have a description but no score yet.
+    // Pure string-matching on ~843 rows takes < 5ms — fast enough to run inline.
+    const repo = new JobsRepo(ctx.db);
+    const unscored = repo.findNeedingFitScore();
+    if (unscored.length > 0) {
+      const signals = ctx.config.scraper?.filters?.target_keywords ?? [];
+      const excludes = ctx.config.scraper?.filters?.excluded_keywords ?? [];
+      ctx.logger.info('fit backfill: starting', { count: unscored.length });
+      for (const job of unscored) {
+        const result = computeFitScore(job, signals, excludes);
+        repo.updateFitScore(job.id, result.score, JSON.stringify(result.reasons));
+      }
+      ctx.logger.info('fit backfill: complete', { scored: unscored.length });
+    }
+
     ctx.logger.debug('jobs module initialized');
   },
 };

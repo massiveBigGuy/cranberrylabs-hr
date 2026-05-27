@@ -26,3 +26,4 @@ config/production.yaml
 .idea/
 *.swp
 .DS_Store
+CLAUDE.md

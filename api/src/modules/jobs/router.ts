@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { AppContext } from '../types';
 import { JobsRepo, isJobStatus, type JobStatus, type ListJobsOptions } from './repo';
 import { TagsRepo } from './repo-tags';
+import { computeFitScore } from './fit-scorer';
 
 /**
  * Builds the /api/jobs router. Endpoints per §4 of the schema:
@@ -70,6 +71,12 @@ export function buildJobsRouter(ctx: AppContext): Router {
     // ^ default: apply config filter. ?filter=off bypasses it (for the
     //   /jobs/all view a future step will add).
 
+    const rawSort = req.query.sort;
+    const sortBy: 'fit' | 'date' =
+      rawSort === 'date' ? 'date' : 'fit';
+    // Default to fit sort — jobs with higher scores rise to the top.
+    // Falls back gracefully when scores are all NULL (date order takes over).
+
     const opts: ListJobsOptions = {
       statuses: parseStatuses(req.query.status),
       since: typeof req.query.since === 'string' ? req.query.since : undefined,
@@ -79,6 +86,7 @@ export function buildJobsRouter(ctx: AppContext): Router {
       search: typeof req.query.search === 'string' ? req.query.search : undefined,
       limit: parseNumberOpt(req.query.limit),
       offset: parseNumberOpt(req.query.offset),
+      sortBy,
       applyKeywordFilter,
       keywordFilter: applyKeywordFilter
         ? {
@@ -242,12 +250,28 @@ export function buildJobsRouter(ctx: AppContext): Router {
     res.status(204).end();
   });
 
-  // POST /api/jobs/:id/refit — deferred to build-order step 4 (fit scoring).
-  router.post('/:id/refit', (_req, res) => {
-    res.status(501).json({
-      error: 'not_implemented',
-      step: 'build-order step 4 (fit scoring)',
-    });
+  // POST /api/jobs/:id/refit — recompute fit_score for a single job.
+  router.post('/:id/refit', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const job = jobs.get(id);
+    if (!job) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    if (!job.description) {
+      res.status(400).json({ error: 'job has no description yet' });
+      return;
+    }
+    const signals = ctx.config.scraper?.filters?.target_keywords ?? [];
+    const excludes = ctx.config.scraper?.filters?.excluded_keywords ?? [];
+    const result = computeFitScore(job, signals, excludes);
+    jobs.updateFitScore(id, result.score, JSON.stringify(result.reasons));
+    const updated = jobs.get(id);
+    res.json({ job: updated, fit_score: result.score, fit_reasons: result.reasons });
   });
 
   return router;

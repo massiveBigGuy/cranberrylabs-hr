@@ -963,8 +963,8 @@ services:
   hr:
     build: .
     container_name: cranberrylabs-hr
-    expose:
-      - "3000"
+    ports:
+      - "3000:3000"
     volumes:
       - ./data:/app/data                # SQLite file
       - ./storage:/app/storage          # generated resumes/cover letters
@@ -974,7 +974,7 @@ services:
     depends_on:
       - hr-redis
     networks:
-      - cranberrylabs
+      - cranberrylabs-hr_default
 
   hr-redis:
     image: redis:7-alpine
@@ -982,11 +982,10 @@ services:
     volumes:
       - ./redis-data:/data
     networks:
-      - cranberrylabs
+      - cranberrylabs-hr_default
 
 networks:
-  cranberrylabs:
-    external: true                      # shared with proxy + Authelia
+  cranberrylabs-hr_default:
 ```
 
 Key points:

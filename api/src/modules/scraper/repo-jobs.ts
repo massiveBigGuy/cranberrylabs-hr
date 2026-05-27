@@ -131,6 +131,12 @@ export class JobsRepo {
       .run(description, descriptionHash, hiringManager, hiringManager, id);
   }
 
+  updateFitScore(id: number, score: number, reasons: string): void {
+    this.db
+      .prepare('UPDATE jobs SET fit_score = ?, fit_reasons = ? WHERE id = ?')
+      .run(score, reasons, id);
+  }
+
   countBySource(sourceId: number): number {
     const row = this.db
       .prepare('SELECT COUNT(*) AS n FROM jobs WHERE source_id = ?')

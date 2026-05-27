@@ -40,6 +40,9 @@ export function JobRow({ job, onOpen }: JobRowProps) {
       <td className="py-3 px-4 text-sm text-muted">{job.location ?? '—'}</td>
       <td className="py-3 px-4 text-sm text-muted">{job.remote_type ?? '—'}</td>
       <td className="py-3 px-4 text-sm text-muted">{postedDisplay}</td>
+      <td className="py-3 px-4 text-sm">
+        <FitBadge score={job.fit_score} />
+      </td>
       <td className="py-3 px-4">
         <span
           className={`text-xs px-2 py-1 rounded ${STATUS_STYLES[job.status]}`}
@@ -49,6 +52,20 @@ export function JobRow({ job, onOpen }: JobRowProps) {
       </td>
     </tr>
   );
+}
+
+function FitBadge({ score }: { score: number | null }) {
+  if (score === null || score === 0) {
+    return <span className="text-muted">—</span>;
+  }
+  const pct = Math.round(score * 100);
+  const color =
+    score >= 0.5
+      ? 'text-green-300'
+      : score >= 0.15
+      ? 'text-yellow-300'
+      : 'text-muted';
+  return <span className={color}>{pct}%</span>;
 }
 
 /**

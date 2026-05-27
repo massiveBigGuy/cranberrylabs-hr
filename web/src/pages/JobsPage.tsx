@@ -16,6 +16,7 @@ export function JobsPage() {
   const [sinceDays, setSinceDays] = useState<number | null>(1);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<'fit' | 'date'>('fit');
 
   // Build the `since` ISO date from sinceDays. null = no date filter.
   const sinceIso =
@@ -24,13 +25,14 @@ export function JobsPage() {
       : new Date(Date.now() - sinceDays * 86_400_000).toISOString().slice(0, 10);
 
   const query = useQuery({
-    queryKey: ['jobs', { since: sinceIso, search }],
+    queryKey: ['jobs', { since: sinceIso, search, sortBy }],
     queryFn: ({ signal }) =>
       api.get<JobsListResponse>(
         '/api/jobs' +
           qs({
             since: sinceIso,
             search,
+            sort: sortBy,
             limit: 100,
           }),
         signal,
@@ -81,6 +83,20 @@ export function JobsPage() {
             label="All"
             active={sinceDays === null}
             onClick={() => setSinceDays(null)}
+          />
+        </div>
+
+        <div className="flex items-center gap-1 text-xs border-l border-surface pl-3">
+          <span className="text-muted mr-1">Sort:</span>
+          <DateFilterButton
+            label="Fit"
+            active={sortBy === 'fit'}
+            onClick={() => setSortBy('fit')}
+          />
+          <DateFilterButton
+            label="Date"
+            active={sortBy === 'date'}
+            onClick={() => setSortBy('date')}
           />
         </div>
       </div>

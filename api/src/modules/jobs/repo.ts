@@ -71,6 +71,7 @@ export interface ListJobsOptions {
   search?: string;            // ?search=sysadmin       → matched against title/company
   limit?: number;             // default 50, capped at 200
   offset?: number;            // default 0
+  sortBy?: 'fit' | 'date';    // ?sort=fit (default) | ?sort=date
   /**
    * Server-side keyword filter from config.scraper.filters. Applied as
    * literal substring matches against title + description. We hold this
@@ -191,9 +192,12 @@ export class JobsRepo {
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    // ORDER BY: prefer posted_date desc when present, fall back to discovered_at.
-    // Ties broken by id desc so newest scraped row wins.
-    const orderSql = `ORDER BY COALESCE(posted_date, discovered_at) DESC, id DESC`;
+    // ORDER BY: fit sort puts scored jobs first (NULLS LAST), then breaks ties
+    // by date. Date sort is the legacy behaviour — by recency only.
+    const orderSql =
+      opts.sortBy === 'date'
+        ? `ORDER BY COALESCE(posted_date, discovered_at) DESC, id DESC`
+        : `ORDER BY fit_score DESC NULLS LAST, COALESCE(posted_date, discovered_at) DESC, id DESC`;
 
     const total = this.db
       .prepare(`SELECT COUNT(*) as n FROM jobs ${whereSql}`)
@@ -248,6 +252,23 @@ export class JobsRepo {
       .prepare('UPDATE jobs SET hiring_manager = ?, hiring_manager_source = ? WHERE id = ?')
       .run(name, source, id);
     return this.get(id);
+  }
+
+  updateFitScore(id: number, score: number, reasons: string): void {
+    this.db
+      .prepare('UPDATE jobs SET fit_score = ?, fit_reasons = ? WHERE id = ?')
+      .run(score, reasons, id);
+  }
+
+  findNeedingFitScore(): Pick<JobRow, 'id' | 'title' | 'description'>[] {
+    return this.db
+      .prepare(
+        `SELECT id, title, description FROM jobs
+         WHERE description != ''
+           AND description IS NOT NULL
+           AND (fit_score IS NULL)`,
+      )
+      .all() as Pick<JobRow, 'id' | 'title' | 'description'>[];
   }
 
   tagsFor(jobId: number): { id: number; name: string; color: string | null }[] {
