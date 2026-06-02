@@ -34,7 +34,7 @@ Build-order progress:
 - [x] Step 3 — Jobs module + list UI
 - [x] Step 3.1 — Detail-sweep give-up, dual count, stats panel
 - [x] Step 4 — Fit scoring v1
-- [ ] Step 5 — Master resume + writing samples
+- [x] Step 5 — Master resume + writing samples
 - [ ] Step 6 — Single generation (Anthropic adapter)
 - [ ] Step 7 — Queue + concurrency
 - [ ] Step 8 — Ollama adapter + model toggle
@@ -159,7 +159,7 @@ canonical example.
 | `sources` | shipped (step 2) | CRUD for company career page URLs; scrape trigger |
 | `scraper` | shipped (step 2) | Workday adapter; queue worker; hourly detail sweep |
 | `jobs` | shipped (step 3 + 3.1) | Read/filter/tag/dismiss jobs; stats endpoint |
-| `resume` | planned (step 5) | Master resume + writing samples |
+| `resume` | shipped (step 5) | Master resume + writing samples |
 | `applications` | planned (step 6) | Generation queue, tailored doc storage, status |
 | `notifications` | planned (step 9) | Browser push / webhook / email |
 | `retention` | planned (step 10) | TTL policies, pin/unpin, nightly sweep |
@@ -285,7 +285,7 @@ CREATE TABLE scrape_runs (
 );
 ```
 
-### `master_resume` — single source of truth for experience [planned, step 5]
+### `master_resume` — single source of truth for experience [shipped, step 5]
 
 ```sql
 CREATE TABLE master_resume (
@@ -298,7 +298,7 @@ CREATE TABLE master_resume (
 );
 ```
 
-### `writing_samples` — voice calibration [planned, step 5]
+### `writing_samples` — voice calibration [shipped, step 5]
 
 ```sql
 CREATE TABLE writing_samples (
@@ -427,9 +427,18 @@ DELETE /api/applications/:id
 GET    /api/applications/queue       live queue status
 ```
 
-### Resume & Writing [planned, step 5]
+### Resume & Writing [shipped, step 5]
 
-Unchanged from v1.
+```
+GET    /api/resume                   active master_resume (or null)
+GET    /api/resume/versions          full version history, newest first
+POST   /api/resume                   create new version (content must be valid JSON)
+PATCH  /api/resume/:id/activate      switch active version
+GET    /api/resume/writing-samples   all writing samples
+POST   /api/resume/writing-samples   { label, kind, content }
+PATCH  /api/resume/writing-samples/:id
+DELETE /api/resume/writing-samples/:id
+```
 
 ### Retention [planned, step 10]
 
@@ -456,9 +465,10 @@ flow, and review workflow are all designed but unbuilt.
 
 ---
 
-## 6. Master Resume Format [planned, step 5]
+## 6. Master Resume Format [shipped, step 5]
 
-Unchanged from v1 schema §6.
+Unchanged from v1 schema §6. Content is stored as a JSON string in
+`master_resume.content`. See v1 §6 for the full field reference.
 
 ---
 
@@ -656,7 +666,7 @@ Annotated with current status:
 5. [x] **Step 4 — Fit scoring v1 (keyword-based).** Backfill scores
    on existing jobs. Sort by fit on the list view. Wire up
    `POST /api/jobs/:id/refit`.
-6. [ ] **Step 5 — Master resume + writing samples.** UI to paste/edit
+6. [x] **Step 5 — Master resume + writing samples.** UI to paste/edit
    JSON and samples. Active version flag.
 7. [ ] **Step 6 — Single generation path (Anthropic adapter).** Click
    "Generate" on one job, get a cover letter + tailored resume saved

@@ -27,3 +27,4 @@ config/production.yaml
 *.swp
 .DS_Store
 CLAUDE.md
+deploy/

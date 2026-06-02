@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 import { JobsPage } from './pages/JobsPage';
+import { ResumePage } from './pages/ResumePage';
 import './index.css';
 
 /**
@@ -33,7 +34,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route element={<App />}>
             <Route index element={<Navigate to="/jobs" replace />} />
             <Route path="/jobs" element={<JobsPage />} />
-            {/* /jobs/all, /sources, /resume, /settings land in later steps */}
+            <Route path="/resume" element={<ResumePage />} />
+            {/* /jobs/all, /sources, /settings land in later steps */}
             <Route path="*" element={<Navigate to="/jobs" replace />} />
           </Route>
         </Routes>

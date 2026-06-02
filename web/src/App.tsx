@@ -23,10 +23,16 @@ export function App() {
             >
               Jobs
             </NavLink>
-            {/* Disabled links — flag what's coming without making them clickable. */}
-            <span className="text-muted/40 cursor-not-allowed" title="Step 5">
+            <NavLink
+              to="/resume"
+              className={({ isActive }) =>
+                `transition-colors ${
+                  isActive ? 'text-ink' : 'text-muted hover:text-ink'
+                }`
+              }
+            >
               Resume
-            </span>
+            </NavLink>
             <span className="text-muted/40 cursor-not-allowed" title="Step 6">
               Applications
             </span>

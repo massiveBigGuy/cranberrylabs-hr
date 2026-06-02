@@ -125,3 +125,37 @@ export interface JobDetailResponse {
   job: Job;
   tags: Tag[];
 }
+
+// ---------- Resume module ----------
+
+export type WritingSampleKind = 'cover_letter' | 'email' | 'bio' | 'other';
+
+export interface MasterResume {
+  id: number;
+  version: number;
+  content: string;  // structured JSON — see §6 of schema-v2.md
+  notes: string | null;
+  is_active: number;  // 0 | 1
+  created_at: string;
+}
+
+export interface WritingSample {
+  id: number;
+  label: string;
+  kind: WritingSampleKind;
+  content: string;
+  active: number;  // 0 | 1
+  created_at: string;
+}
+
+export interface ResumeResponse {
+  resume: MasterResume | null;
+}
+
+export interface ResumeVersionsResponse {
+  versions: MasterResume[];
+}
+
+export interface WritingSamplesResponse {
+  samples: WritingSample[];
+}

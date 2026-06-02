@@ -16,13 +16,14 @@ import type { Module } from './types';
 import { sourcesModule } from './sources';
 import { scraperModule } from './scraper';
 import { jobsModule } from './jobs';
+import { resumeModule } from './resume';
 
 export const modules: Module[] = [
   sourcesModule,
   scraperModule,
   jobsModule,
+  resumeModule,
   // Future, added in their respective build-order steps:
-  //   resumeModule,         — step 5
   //   applicationsModule,   — step 6
   //   notificationsModule,  — step 9
   //   retentionModule,      — step 10
