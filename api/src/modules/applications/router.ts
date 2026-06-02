@@ -1,14 +1,19 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Queue } from 'bullmq';
 import type { AppContext } from '../types';
 import type { LLMAdapter } from '../../services/llm';
+import type { GenerationJobData } from './worker';
 import { ApplicationsRepo, isApplicationStatus } from './repo';
 import { ResumeRepo } from '../resume/repo';
-import { generateApplication } from './generator';
 import { bus } from '../../services/sse/bus';
 
-export function buildApplicationsRouter(ctx: AppContext, adapter: LLMAdapter): Router {
+export function buildApplicationsRouter(
+  ctx: AppContext,
+  adapter: LLMAdapter,
+  generationQueue: Queue<GenerationJobData>,
+): Router {
   const router = Router();
   const apps = new ApplicationsRepo(ctx.db);
   const resume = new ResumeRepo(ctx.db);
@@ -18,8 +23,7 @@ export function buildApplicationsRouter(ctx: AppContext, adapter: LLMAdapter): R
   router.get('/', (req, res) => {
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
     const jobIdRaw = req.query.job_id;
-    const jobId =
-      jobIdRaw !== undefined ? Number(jobIdRaw) : undefined;
+    const jobId = jobIdRaw !== undefined ? Number(jobIdRaw) : undefined;
 
     const list = apps.list({
       status: isApplicationStatus(status) ? status : undefined,
@@ -28,7 +32,7 @@ export function buildApplicationsRouter(ctx: AppContext, adapter: LLMAdapter): R
     res.json({ applications: list });
   });
 
-  // POST /api/applications — generate for a job (synchronous, step 6)
+  // POST /api/applications — enqueue generation for a job (returns 202 immediately)
   router.post('/', async (req, res) => {
     const rawId = req.body?.job_id;
     const jobId = typeof rawId === 'number' ? rawId : Number(rawId);
@@ -71,69 +75,47 @@ export function buildApplicationsRouter(ctx: AppContext, adapter: LLMAdapter): R
       return;
     }
 
-    const samples = resume.listWritingSamples();
     const userId = req.user?.username ?? 'unknown';
-
     const app = apps.create(jobId, userId, activeResume.id);
-    apps.addEvent(app.id, 'generation.started', { model: ctx.config.llm.anthropic.model });
-    bus.publish('application.started', { applicationId: app.id, jobId });
 
-    try {
-      const output = await generateApplication(
-        app.id,
-        jobRow,
-        activeResume,
-        samples,
-        adapter,
-        storageRoot,
-      );
+    const bullJob = await generationQueue.add('generate', {
+      applicationId: app.id,
+      jobId,
+      userId,
+    });
+    ctx.db
+      .prepare('UPDATE applications SET queue_job_id = ? WHERE id = ?')
+      .run(bullJob.id ?? null, app.id);
 
-      const updated = apps.updateGenerated(app.id, {
-        modelUsed: output.modelUsed,
-        resumePath: output.resumePath,
-        coverPath: output.coverPath,
-        diff: output.diff,
-        resumeVersionId: activeResume.id,
-      });
+    apps.addEvent(app.id, 'generation.queued', { adapter: adapter.name });
+    bus.publish('application.queued', { applicationId: app.id, jobId });
 
-      // Advance job status to ready (don't clobber applied/archived)
-      ctx.db
-        .prepare(
-          `UPDATE jobs SET status = 'ready'
-           WHERE id = ? AND status NOT IN ('applied', 'archived', 'dismissed')`,
-        )
-        .run(jobId);
+    ctx.logger.info('applications: queued for generation', {
+      appId: app.id,
+      jobId,
+      queueJobId: bullJob.id,
+    });
 
-      apps.addEvent(app.id, 'generation.completed', {
-        model: output.modelUsed,
-        inputTokens: output.inputTokens,
-        outputTokens: output.outputTokens,
-      });
-      bus.publish('application.ready', { applicationId: app.id, jobId });
-
-      ctx.logger.info('applications: generation complete', {
-        appId: app.id,
-        jobId,
-        model: output.modelUsed,
-        inputTokens: output.inputTokens,
-        outputTokens: output.outputTokens,
-      });
-
-      res.status(201).json({ application: updated ?? app });
-    } catch (err) {
-      const msg = (err as Error).message;
-      ctx.logger.warn('applications: generation failed', { appId: app.id, jobId, error: msg });
-      apps.updateFailed(app.id, msg);
-      apps.addEvent(app.id, 'generation.failed', { error: msg });
-      bus.publish('application.failed', { applicationId: app.id, jobId, error: msg });
-      res.status(500).json({ error: msg });
-    }
+    res.status(202).json({ application: apps.get(app.id) ?? app });
   });
 
-  // GET /api/applications/queue — step 7 placeholder
+  // GET /api/applications/queue — live queue counts
   // Must be registered before /:id so 'queue' isn't swallowed by the wildcard.
-  router.get('/queue', (_req, res) => {
-    res.status(501).json({ error: 'queue view is not yet implemented (step 7)' });
+  router.get('/queue', async (_req, res) => {
+    const [waiting, active, completed, failed, delayed] = await Promise.all([
+      generationQueue.getWaitingCount(),
+      generationQueue.getActiveCount(),
+      generationQueue.getCompletedCount(),
+      generationQueue.getFailedCount(),
+      generationQueue.getDelayedCount(),
+    ]);
+    res.json({
+      queued: waiting + delayed,
+      active,
+      completed,
+      failed,
+      total: waiting + active + delayed + completed + failed,
+    });
   });
 
   // GET /api/applications/:id — detail
@@ -152,8 +134,6 @@ export function buildApplicationsRouter(ctx: AppContext, adapter: LLMAdapter): R
   });
 
   // GET /api/applications/:id/cover — serve cover letter file
-  // Must be before /:id/regenerate and /:id/submit so Express doesn't
-  // misroute the literal segment 'cover'.
   router.get('/:id/cover', (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -207,9 +187,43 @@ export function buildApplicationsRouter(ctx: AppContext, adapter: LLMAdapter): R
     res.sendFile(filePath);
   });
 
-  // POST /api/applications/:id/regenerate — step 7 placeholder
-  router.post('/:id/regenerate', (_req, res) => {
-    res.status(501).json({ error: 'regenerate is not yet implemented (step 7)' });
+  // POST /api/applications/:id/regenerate — re-enqueue a failed application
+  router.post('/:id/regenerate', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const app = apps.get(id);
+    if (!app) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    if (app.status !== 'failed') {
+      res.status(409).json({
+        error: `cannot regenerate — current status is '${app.status}'`,
+      });
+      return;
+    }
+
+    apps.updateStatus(id, 'queued');
+    ctx.db
+      .prepare(`UPDATE applications SET generation_error = NULL, updated_at = datetime('now') WHERE id = ?`)
+      .run(id);
+
+    const bullJob = await generationQueue.add('generate', {
+      applicationId: id,
+      jobId: app.job_id,
+      userId: app.user_id,
+    });
+    ctx.db
+      .prepare('UPDATE applications SET queue_job_id = ? WHERE id = ?')
+      .run(bullJob.id ?? null, id);
+
+    apps.addEvent(id, 'generation.queued', { adapter: adapter.name, regenerate: true });
+    bus.publish('application.queued', { applicationId: id, jobId: app.job_id });
+
+    res.json({ application: apps.get(id) ?? app });
   });
 
   // POST /api/applications/:id/submit — mark as applied
@@ -236,7 +250,7 @@ export function buildApplicationsRouter(ctx: AppContext, adapter: LLMAdapter): R
     res.json({ application: updated ?? app });
   });
 
-  // DELETE /api/applications/:id — delete + clean up generated files
+  // DELETE /api/applications/:id — delete row + clean up generated files
   router.delete('/:id', (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {

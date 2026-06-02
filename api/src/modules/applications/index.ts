@@ -1,31 +1,48 @@
-import type { Module, AppContext } from '../types';
+import type { Module, AppContext, WorkerRegistration } from '../types';
 import { Router } from 'express';
 import { migrations } from './migrations';
 import { buildApplicationsRouter } from './router';
+import { buildGenerationWorker, GENERATION_QUEUE_NAME, type GenerationJobData } from './worker';
 import { buildLLMAdapter } from '../../services/llm';
+import { makeQueue } from '../../services/queue';
 import fs from 'node:fs';
 import path from 'node:path';
 
 export const applicationsModule: Module = {
   name: 'applications',
-  version: '0.1.0',
+  version: '0.2.0',
   router: Router(),
   migrations,
   workers: [],
   scheduledTasks: [],
   init: async (ctx: AppContext) => {
-    // Ensure storage directory exists at startup. storageRoot may be relative
-    // to CWD (which in Docker is /app), so resolve it to absolute first.
     const storageRoot = path.resolve(ctx.config.storage.root);
     fs.mkdirSync(storageRoot, { recursive: true });
 
-    // Build the LLM adapter from config. The Anthropic adapter defers API key
-    // validation to generate() time — the module initialises cleanly even when
-    // ANTHROPIC_API_KEY is not yet set.
     const adapter = buildLLMAdapter(ctx.config);
     ctx.services.register('llm_adapter', adapter);
 
-    applicationsModule.router = buildApplicationsRouter(ctx, adapter);
+    // Generation queue — 3 attempts (2 retries) so transient LLM errors
+    // (missing XML sections, empty responses) get a second chance before
+    // the application is marked permanently failed.
+    const generationQueue = makeQueue<GenerationJobData>(GENERATION_QUEUE_NAME, ctx.config, {
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: { count: 200 },
+        removeOnFail: { count: 200 },
+      },
+    });
+    ctx.services.register('generation_queue', generationQueue);
+
+    applicationsModule.router = buildApplicationsRouter(ctx, adapter, generationQueue);
+
+    const reg: WorkerRegistration = {
+      queueName: GENERATION_QUEUE_NAME,
+      build: (c) => buildGenerationWorker(c, adapter),
+    };
+    applicationsModule.workers!.push(reg);
+
     ctx.logger.debug('applications module initialized');
   },
 };

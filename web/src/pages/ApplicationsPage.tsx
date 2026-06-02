@@ -14,6 +14,9 @@ export function ApplicationsPage() {
   });
 
   const applications = data?.applications ?? [];
+  const activeCount = applications.filter(
+    (a) => a.status === 'queued' || a.status === 'generating',
+  ).length;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
@@ -26,6 +29,14 @@ export function ApplicationsPage() {
         )}
       </div>
 
+      {/* Queue activity strip — only visible when jobs are in-flight */}
+      {activeCount > 0 && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2 rounded bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm">
+          <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+          {activeCount} application{activeCount === 1 ? '' : 's'} in queue
+        </div>
+      )}
+
       {isLoading && (
         <div className="text-muted text-sm py-12 text-center">Loading…</div>
       )}
@@ -34,7 +45,7 @@ export function ApplicationsPage() {
         <div className="text-muted text-sm py-12 text-center">
           No applications yet. Open a job from the{' '}
           <a href="/jobs" className="text-accent hover:underline">Jobs page</a>
-          {' '}and click Generate Application.
+          {' '}and click Generate Application, or select multiple jobs and click Generate.
         </div>
       )}
 
@@ -129,13 +140,13 @@ function ApplicationRow({
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     generating: 'bg-yellow-500/15 text-yellow-300',
     ready:      'bg-green-500/15 text-green-400',
     applied:    'bg-accent/20 text-accent',
     failed:     'bg-red-500/15 text-red-400',
-    queued:     'bg-surface text-muted',
+    queued:     'bg-blue-500/15 text-blue-300',
     archived:   'bg-surface text-muted',
   };
   const labels: Record<string, string> = {
@@ -185,7 +196,6 @@ function ApplicationDetailDrawer({
     enabled: open,
   });
 
-  // Fetch cover letter text when drawer is open and app is ready
   const app = data?.application ?? null;
   const canFetchCover = open && !!app?.cover_letter_path;
   const { data: coverText } = useQuery({
@@ -200,6 +210,14 @@ function ApplicationDetailDrawer({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['applications'] });
       qc.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+
+  const regenerate = useMutation({
+    mutationFn: () => api.post(`/api/applications/${appId}/regenerate`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+      onClose();
     },
   });
 
@@ -259,11 +277,31 @@ function ApplicationDetailDrawer({
               </div>
             </div>
 
-            {/* Error display */}
-            {app.status === 'failed' && app.generation_error && (
-              <div className="px-4 py-3 rounded bg-red-500/10 text-red-400 text-sm">
-                <p className="font-medium mb-1">Generation failed</p>
-                <p className="text-xs font-mono">{app.generation_error}</p>
+            {/* In-queue / generating state */}
+            {(app.status === 'queued' || app.status === 'generating') && (
+              <div className="px-4 py-3 rounded bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm">
+                {app.status === 'queued'
+                  ? 'Waiting in queue…'
+                  : 'Generating cover letter and tailored resume…'}
+              </div>
+            )}
+
+            {/* Error display + retry */}
+            {app.status === 'failed' && (
+              <div className="px-4 py-3 rounded bg-red-500/10 text-red-400 text-sm space-y-3">
+                <div>
+                  <p className="font-medium mb-1">Generation failed</p>
+                  {app.generation_error && (
+                    <p className="text-xs font-mono">{app.generation_error}</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => regenerate.mutate()}
+                  disabled={regenerate.isPending}
+                  className="text-xs px-3 py-1.5 rounded border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
+                >
+                  {regenerate.isPending ? 'Queuing…' : 'Retry Generation'}
+                </button>
               </div>
             )}
 

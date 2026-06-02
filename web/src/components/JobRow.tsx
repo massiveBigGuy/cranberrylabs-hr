@@ -3,16 +3,10 @@ import type { Job } from '../lib/api';
 interface JobRowProps {
   job: Job;
   onOpen: () => void;
+  selected: boolean;
+  onToggle: () => void;
 }
 
-/**
- * One row in the jobs table. Click anywhere on the row to open the
- * detail drawer; the title gets a stronger visual cue but the whole
- * row is the hit target (matches how mail clients work).
- *
- * Status pill colors map to the JobStatus enum. New = neutral, dismissed
- * = muted, applied = accent.
- */
 const STATUS_STYLES: Record<Job['status'], string> = {
   new: 'bg-surface text-ink',
   reviewing: 'bg-yellow-500/20 text-yellow-300',
@@ -24,15 +18,29 @@ const STATUS_STYLES: Record<Job['status'], string> = {
   archived: 'bg-surface text-muted',
 };
 
-export function JobRow({ job, onOpen }: JobRowProps) {
+export function JobRow({ job, onOpen, selected, onToggle }: JobRowProps) {
   const posted = job.posted_date ?? job.discovered_at;
   const postedDisplay = posted ? formatRelative(posted) : '—';
 
   return (
     <tr
       onClick={onOpen}
-      className="border-b border-surface hover:bg-surface/60 cursor-pointer transition-colors"
+      className={`border-b border-surface hover:bg-surface/60 cursor-pointer transition-colors ${
+        selected ? 'bg-surface/40' : ''
+      }`}
     >
+      {/* Checkbox cell — stopPropagation prevents the row click from firing */}
+      <td
+        className="py-3 pl-4 pr-1 w-8"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggle}
+          className="w-3.5 h-3.5 cursor-pointer accent-accent"
+        />
+      </td>
       <td className="py-3 px-4">
         <div className="font-medium text-ink">{job.title}</div>
         <div className="text-xs text-muted">{job.company}</div>
@@ -44,9 +52,7 @@ export function JobRow({ job, onOpen }: JobRowProps) {
         <FitBadge score={job.fit_score} />
       </td>
       <td className="py-3 px-4">
-        <span
-          className={`text-xs px-2 py-1 rounded ${STATUS_STYLES[job.status]}`}
-        >
+        <span className={`text-xs px-2 py-1 rounded ${STATUS_STYLES[job.status]}`}>
           {job.status}
         </span>
       </td>
@@ -68,12 +74,6 @@ function FitBadge({ score }: { score: number | null }) {
   return <span className={color}>{pct}%</span>;
 }
 
-/**
- * Relative-time formatting. We choose "X days ago" over absolute dates
- * because the dashboard's primary view is "what's posted recently" —
- * 2 days ago is more useful than May 13. Falls back to absolute for
- * anything older than a week.
- */
 function formatRelative(iso: string): string {
   const then = new Date(iso);
   if (isNaN(then.getTime())) return iso;

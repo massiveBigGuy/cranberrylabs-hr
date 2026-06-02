@@ -65,10 +65,16 @@ export class ApplicationsRepo {
     return this.db
       .prepare(
         `INSERT INTO applications (job_id, user_id, status, resume_version_id)
-         VALUES (?, ?, 'generating', ?)
+         VALUES (?, ?, 'queued', ?)
          RETURNING *`,
       )
       .get(jobId, userId, resumeVersionId ?? null) as ApplicationRow;
+  }
+
+  updateStatus(id: number, status: ApplicationStatus): void {
+    this.db
+      .prepare(`UPDATE applications SET status = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run(status, id);
   }
 
   get(id: number): ApplicationWithJob | null {

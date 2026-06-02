@@ -36,7 +36,7 @@ Build-order progress:
 - [x] Step 4 — Fit scoring v1
 - [x] Step 5 — Master resume + writing samples
 - [x] Step 6 — Single generation (Anthropic adapter)
-- [ ] Step 7 — Queue + concurrency
+- [x] Step 7 — Queue + concurrency
 - [ ] Step 7.1 — Multi-user + permissions
 - [ ] Step 8 — Ollama adapter + model toggle
 - [ ] Step 9 — Notifications
@@ -424,7 +424,7 @@ POST   /api/jobs/:id/refit           → recomputes fit_score for one job
 Route ordering: `GET /stats` registers BEFORE `GET /:id` to prevent
 the `:id` wildcard from matching the literal string `stats`.
 
-### Applications (Generation Queue) [shipped step 6, queue step 7]
+### Applications (Generation Queue) [shipped steps 6 + 7]
 
 ```
 POST   /api/applications             enqueue generation (synchronous, step 6)
@@ -438,10 +438,12 @@ POST   /api/applications/:id/submit  mark applied; { notes? }
 DELETE /api/applications/:id         delete + clean up generated files
 ```
 
-**[revised from v1]** Step 6 runs generation synchronously in the POST
-handler — no BullMQ worker yet. The `queue_job_id` column is reserved for
-step 7. File outputs are plain text/JSON at `storage/applications/{id}/`.
-DOCX rendering is deferred to step 11 polish.
+**[revised from v1]** Step 6 shipped synchronous generation; step 7 moved it
+into a BullMQ worker. `POST /api/applications` now returns 202 immediately;
+the worker processes jobs with 3 attempts (2 retries) for transient LLM
+failures. `queue_job_id` is populated on enqueue. File outputs are plain
+text/JSON at `storage/applications/{id}/`. DOCX rendering is deferred to
+step 11 polish.
 
 ### Resume & Writing [shipped, step 5]
 
@@ -474,11 +476,10 @@ convention.
 
 ---
 
-## 5. Generation Pipeline [partially shipped, step 6]
+## 5. Generation Pipeline [shipped, steps 6 + 7]
 
-The model adapter interface and single-generation path are shipped. The
-BullMQ queue worker, batch selection, and SSE progress streaming are
-planned for step 7.
+The model adapter interface, generation worker, BullMQ queue, batch
+selection, and SSE progress streaming are all shipped.
 
 ### LLM Adapter interface [shipped, step 6]
 
@@ -721,7 +722,7 @@ Annotated with current status:
 7. [x] **Step 6 — Single generation path (Anthropic adapter).** Click
    "Generate" on one job, get a cover letter + tailored resume saved
    to disk. Review UI shows the diff.
-8. [ ] **Step 7 — BullMQ queue + worker concurrency.** Batch select
+8. [x] **Step 7 — BullMQ queue + worker concurrency.** Batch select
    multiple jobs, watch the queue drain. SSE-driven progress.
 9. [ ] **Step 7.1 — Multi-user + permissions.** Add `user_id` to all
    owned tables via migrations, scope all repo queries, wire up the

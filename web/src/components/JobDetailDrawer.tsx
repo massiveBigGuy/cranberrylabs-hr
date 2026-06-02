@@ -320,7 +320,7 @@ function GenerateControl({
         disabled={isPending}
         className="text-sm px-3 py-1.5 rounded border border-accent bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isPending ? 'Generating… (15–30 s)' : 'Generate Application'}
+        {isPending ? 'Queuing…' : 'Generate Application'}
       </button>
       {error && (
         <p className="text-xs text-red-400 max-w-xs truncate" title={error.message}>

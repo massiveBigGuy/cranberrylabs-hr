@@ -35,14 +35,17 @@ export function useSseInvalidator() {
       // step adds a queue-status component that listens for this.
     });
 
+    es.addEventListener('application.queued', () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+    });
+    es.addEventListener('application.started', () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+    });
     es.addEventListener('application.ready', () => {
       qc.invalidateQueries({ queryKey: ['applications'] });
       qc.invalidateQueries({ queryKey: ['jobs'] });
     });
     es.addEventListener('application.failed', () => {
-      qc.invalidateQueries({ queryKey: ['applications'] });
-    });
-    es.addEventListener('application.started', () => {
       qc.invalidateQueries({ queryKey: ['applications'] });
     });
 

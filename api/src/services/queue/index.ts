@@ -32,6 +32,9 @@ export function makeQueue<T = unknown>(
   config: AppConfig,
   options?: Partial<QueueOptions>,
 ): Queue<T> {
+  // BullMQ v5 internal generics (DataTypeOrJob / ExtractDataType) create a
+  // structural mismatch against the declared Queue<T>. The cast is safe —
+  // the runtime value is exactly what Queue<T> describes.
   return new Queue<T>(name, {
     connection: makeConnectionOpts(config),
     defaultJobOptions: {
@@ -41,7 +44,7 @@ export function makeQueue<T = unknown>(
       removeOnFail: { count: 200 },
     },
     ...options,
-  });
+  }) as unknown as Queue<T>;
 }
 
 /**
@@ -54,11 +57,12 @@ export function makeWorker<T = unknown, R = unknown>(
   config: AppConfig,
   options?: Partial<WorkerOptions>,
 ): Worker<T, R> {
+  // Same BullMQ v5 generic mismatch as makeQueue — cast is safe at runtime.
   const worker = new Worker<T, R>(name, processor, {
     connection: makeConnectionOpts(config),
     concurrency: config.queue.concurrency,
     ...options,
-  });
+  }) as unknown as Worker<T, R>;
   worker.on('failed', (job, err) => {
     log.warn('job failed', { queue: name, jobId: job?.id, error: err.message });
   });

@@ -28,6 +28,14 @@ export interface WritingSampleRow {
 export class ResumeRepo {
   constructor(private readonly db: DB) {}
 
+  getById(id: number): MasterResumeRow | null {
+    return (
+      (this.db
+        .prepare('SELECT * FROM master_resume WHERE id = ?')
+        .get(id) as MasterResumeRow | undefined) ?? null
+    );
+  }
+
   getActive(): MasterResumeRow | null {
     return (
       (this.db
