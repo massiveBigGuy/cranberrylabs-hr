@@ -35,6 +35,17 @@ export function useSseInvalidator() {
       // step adds a queue-status component that listens for this.
     });
 
+    es.addEventListener('application.ready', () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+    });
+    es.addEventListener('application.failed', () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+    });
+    es.addEventListener('application.started', () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+    });
+
     // The default 'message' event is what unnamed events come in as.
     // The step-2 bus formats events with `event: <name>` so we get
     // them on the named listeners above, not here. Left as a debug

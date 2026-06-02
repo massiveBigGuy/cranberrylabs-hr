@@ -13,6 +13,7 @@
     "smoke:workday": "tsx src/scripts/smoke-workday.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "better-sqlite3": "^11.3.0",
     "bullmq": "^5.21.0",
     "express": "^4.21.0",

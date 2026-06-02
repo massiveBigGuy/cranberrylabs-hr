@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, type Job, type JobDetailResponse, type Tag } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
+import { api, type Job, type JobDetailResponse, type Tag, type ApplicationWithJob } from '../lib/api';
 
 interface JobDetailDrawerProps {
   jobId: number | null;
@@ -21,6 +22,7 @@ interface JobDetailDrawerProps {
  */
 export function JobDetailDrawer({ jobId, onClose }: JobDetailDrawerProps) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const open = jobId !== null;
 
   // Close on ESC. Listener registered only while open to avoid
@@ -70,6 +72,29 @@ export function JobDetailDrawer({ jobId, onClose }: JobDetailDrawerProps) {
       api.delete(`/api/jobs/${jobId}/tags/${tagId}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['jobs', jobId] });
+    },
+  });
+
+  // Check whether an application already exists for this job.
+  const { data: appData } = useQuery({
+    queryKey: ['applications', 'by-job', jobId],
+    queryFn: ({ signal }) =>
+      api.get<{ applications: ApplicationWithJob[] }>(
+        `/api/applications?job_id=${jobId}`,
+        signal,
+      ),
+    enabled: open,
+  });
+  const existingApp = appData?.applications[0] ?? null;
+
+  const generate = useMutation({
+    mutationFn: () =>
+      api.post<{ application: ApplicationWithJob }>('/api/applications', { job_id: jobId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      navigate('/applications');
+      onClose();
     },
   });
 
@@ -151,6 +176,12 @@ export function JobDetailDrawer({ jobId, onClose }: JobDetailDrawerProps) {
               <DismissControl
                 disabled={dismiss.isPending}
                 onDismiss={(reason) => dismiss.mutate(reason)}
+              />
+              <GenerateControl
+                existing={existingApp}
+                isPending={generate.isPending}
+                error={generate.error as Error | null}
+                onGenerate={() => generate.mutate()}
               />
             </div>
 
@@ -256,6 +287,46 @@ function DismissControl({
       >
         Cancel
       </button>
+    </div>
+  );
+}
+
+function GenerateControl({
+  existing,
+  isPending,
+  error,
+  onGenerate,
+}: {
+  existing: ApplicationWithJob | null;
+  isPending: boolean;
+  error: Error | null;
+  onGenerate: () => void;
+}) {
+  if (existing) {
+    return (
+      <a
+        href="/applications"
+        className="text-sm px-3 py-1.5 rounded border border-surface text-accent hover:border-accent transition-colors"
+      >
+        View Application →
+      </a>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        onClick={onGenerate}
+        disabled={isPending}
+        className="text-sm px-3 py-1.5 rounded border border-accent bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isPending ? 'Generating… (15–30 s)' : 'Generate Application'}
+      </button>
+      {error && (
+        <p className="text-xs text-red-400 max-w-xs truncate" title={error.message}>
+          {error.message}
+        </p>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 import { JobsPage } from './pages/JobsPage';
 import { ResumePage } from './pages/ResumePage';
+import { ApplicationsPage } from './pages/ApplicationsPage';
 import './index.css';
 
 /**
@@ -35,6 +36,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route index element={<Navigate to="/jobs" replace />} />
             <Route path="/jobs" element={<JobsPage />} />
             <Route path="/resume" element={<ResumePage />} />
+            <Route path="/applications" element={<ApplicationsPage />} />
             {/* /jobs/all, /sources, /settings land in later steps */}
             <Route path="*" element={<Navigate to="/jobs" replace />} />
           </Route>

@@ -35,8 +35,9 @@ Build-order progress:
 - [x] Step 3.1 — Detail-sweep give-up, dual count, stats panel
 - [x] Step 4 — Fit scoring v1
 - [x] Step 5 — Master resume + writing samples
-- [ ] Step 6 — Single generation (Anthropic adapter)
+- [x] Step 6 — Single generation (Anthropic adapter)
 - [ ] Step 7 — Queue + concurrency
+- [ ] Step 7.1 — Multi-user + permissions
 - [ ] Step 8 — Ollama adapter + model toggle
 - [ ] Step 9 — Notifications
 - [ ] Step 10 — Retention
@@ -160,7 +161,8 @@ canonical example.
 | `scraper` | shipped (step 2) | Workday adapter; queue worker; hourly detail sweep |
 | `jobs` | shipped (step 3 + 3.1) | Read/filter/tag/dismiss jobs; stats endpoint |
 | `resume` | shipped (step 5) | Master resume + writing samples |
-| `applications` | planned (step 6) | Generation queue, tailored doc storage, status |
+| `applications` | shipped (step 6) | Generation queue, tailored doc storage, status |
+| `users` | planned (step 7.1) | User registry, role assignments, permission checks |
 | `notifications` | planned (step 9) | Browser push / webhook / email |
 | `retention` | planned (step 10) | TTL policies, pin/unpin, nightly sweep |
 
@@ -173,7 +175,11 @@ SQLite via `better-sqlite3`. Foreign keys enabled. Timestamps as ISO
 
 ### `sources` — companies/URLs to scrape [shipped]
 
-Created in `sources_001_init`.
+Created in `sources_001_init`. A `user_id TEXT NOT NULL` column will
+be added in a `sources_002_user_id` migration at step 7.1. The
+`UNIQUE` constraint on `tenant_url` will be relaxed to
+`UNIQUE(user_id, tenant_url)` at the same time, since two users may
+legitimately scrape the same company.
 
 ```sql
 CREATE TABLE sources (
@@ -287,6 +293,9 @@ CREATE TABLE scrape_runs (
 
 ### `master_resume` — single source of truth for experience [shipped, step 5]
 
+A `user_id TEXT NOT NULL` column will be added in a
+`resume_002_user_id` migration at step 7.1.
+
 ```sql
 CREATE TABLE master_resume (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -300,6 +309,9 @@ CREATE TABLE master_resume (
 
 ### `writing_samples` — voice calibration [shipped, step 5]
 
+A `user_id TEXT NOT NULL` column will be added in a
+`resume_003_user_id` migration at step 7.1.
+
 ```sql
 CREATE TABLE writing_samples (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -311,12 +323,13 @@ CREATE TABLE writing_samples (
 );
 ```
 
-### `applications` — generation + tracking [planned, step 6]
+### `applications` — generation + tracking [shipped, step 6]
 
 ```sql
 CREATE TABLE applications (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id            INTEGER NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+  user_id           TEXT    NOT NULL,              -- Authelia Remote-User; scopes row to owner (step 7.1)
   status            TEXT    NOT NULL DEFAULT 'queued',
   queue_job_id      TEXT,
   model_used        TEXT,
@@ -341,7 +354,7 @@ CREATE TABLE applications (
 CREATE INDEX idx_apps_status ON applications(status);
 ```
 
-### `application_events` — audit log [planned, step 6]
+### `application_events` — audit log [shipped, step 6]
 
 ```sql
 CREATE TABLE application_events (
@@ -411,21 +424,24 @@ POST   /api/jobs/:id/refit           → recomputes fit_score for one job
 Route ordering: `GET /stats` registers BEFORE `GET /:id` to prevent
 the `:id` wildcard from matching the literal string `stats`.
 
-### Applications (Generation Queue) [planned, steps 6–7]
-
-Unchanged from v1 design.
+### Applications (Generation Queue) [shipped step 6, queue step 7]
 
 ```
-POST   /api/applications             enqueue generation
-GET    /api/applications             list with filters
+POST   /api/applications             enqueue generation (synchronous, step 6)
+GET    /api/applications             list; ?status=ready&job_id=42
+GET    /api/applications/queue       501 — live queue status (step 7)
 GET    /api/applications/:id         detail + paths
-GET    /api/applications/:id/resume  stream the resume file
-GET    /api/applications/:id/cover   stream the cover letter
-POST   /api/applications/:id/regenerate
-POST   /api/applications/:id/submit
-DELETE /api/applications/:id
-GET    /api/applications/queue       live queue status
+GET    /api/applications/:id/cover   stream cover letter (text/plain)
+GET    /api/applications/:id/resume  stream tailored resume (application/json)
+POST   /api/applications/:id/regenerate  501 (step 7)
+POST   /api/applications/:id/submit  mark applied; { notes? }
+DELETE /api/applications/:id         delete + clean up generated files
 ```
+
+**[revised from v1]** Step 6 runs generation synchronously in the POST
+handler — no BullMQ worker yet. The `queue_job_id` column is reserved for
+step 7. File outputs are plain text/JSON at `storage/applications/{id}/`.
+DOCX rendering is deferred to step 11 polish.
 
 ### Resume & Writing [shipped, step 5]
 
@@ -458,10 +474,44 @@ convention.
 
 ---
 
-## 5. Generation Pipeline [planned, steps 6–7]
+## 5. Generation Pipeline [partially shipped, step 6]
 
-Unchanged from v1 schema §5. The model adapter interface, queue
-flow, and review workflow are all designed but unbuilt.
+The model adapter interface and single-generation path are shipped. The
+BullMQ queue worker, batch selection, and SSE progress streaming are
+planned for step 7.
+
+### LLM Adapter interface [shipped, step 6]
+
+Defined in `api/src/services/llm/types.ts`. A factory
+`buildLLMAdapter(config)` in `api/src/services/llm/index.ts` creates the
+correct adapter from `config.llm.default_adapter`. Currently only
+`'anthropic'` is implemented; `'ollama'` is planned for step 8.
+
+```typescript
+interface LLMAdapter {
+  readonly name: string;
+  generate(req: GenerationRequest): Promise<GenerationResult>;
+}
+```
+
+The `AnthropicAdapter` defers API-key validation to `generate()` time so
+the container starts cleanly even when `ANTHROPIC_API_KEY` is not set.
+
+### Generation flow [shipped, step 6]
+
+`POST /api/applications { job_id }` runs generation inline (no queue):
+1. Validate job exists and has a description.
+2. Load the active master resume and all active writing samples.
+3. Call `adapter.generate(...)` — produces a cover letter and a tailored
+   resume JSON from the Anthropic API.
+4. Write `storage/applications/{id}/cover_letter.txt` and `.../resume.json`.
+5. Compute a field-level diff (JSON array of `{ key, from, to }` entries).
+6. Update the `applications` row to `status = 'ready'`; update the job
+   to `status = 'ready'`.
+7. Return the application row.
+
+The step-6 generation holds the HTTP connection open for the ~15–30 s
+LLM call. Step 7 will move this into a BullMQ worker.
 
 ---
 
@@ -668,18 +718,22 @@ Annotated with current status:
    `POST /api/jobs/:id/refit`.
 6. [x] **Step 5 — Master resume + writing samples.** UI to paste/edit
    JSON and samples. Active version flag.
-7. [ ] **Step 6 — Single generation path (Anthropic adapter).** Click
+7. [x] **Step 6 — Single generation path (Anthropic adapter).** Click
    "Generate" on one job, get a cover letter + tailored resume saved
    to disk. Review UI shows the diff.
 8. [ ] **Step 7 — BullMQ queue + worker concurrency.** Batch select
    multiple jobs, watch the queue drain. SSE-driven progress.
-9. [ ] **Step 8 — Ollama adapter + model toggle.** UI switch on the
-   enqueue dialog.
-10. [ ] **Step 9 — Notifications module.** Browser push + webhook
+9. [ ] **Step 7.1 — Multi-user + permissions.** Add `user_id` to all
+   owned tables via migrations, scope all repo queries, wire up the
+   `users` table and `requireRole` middleware, and add the `/api/users`
+   surface. See §16.
+10. [ ] **Step 8 — Ollama adapter + model toggle.** UI switch on the
+    enqueue dialog.
+11. [ ] **Step 9 — Notifications module.** Browser push + webhook
     channel. Fires on `queue.drained`.
-11. [ ] **Step 10 — Retention module.** Sweep cron, pin/unpin
+12. [ ] **Step 10 — Retention module.** Sweep cron, pin/unpin
     endpoints, expiry badges. Default 7-day policy.
-12. [ ] **Step 11 — Polish.** Scrape_runs admin view, retry/regenerate-
+13. [ ] **Step 11 — Polish.** Scrape_runs admin view, retry/regenerate-
     with-feedback button, anything left.
 
 ---
@@ -717,6 +771,16 @@ Unchanged from v1.
     alongside `total` makes the keyword-filter gap legible at a
     glance — important because the gap is often 95%+ (845 scraped,
     25 shown in the current deployment).
+11. **[new] Global tags, per-user everything else.** Tags are a shared
+    vocabulary across all users — no `user_id` on `tags` or `job_tags`.
+    All other data (sources, jobs, resume, applications) is scoped to
+    the owning Authelia username. See §16.
+    Write access to tags is `user`-and-above; a `viewer` cannot create
+    or delete tags. Tag application requires ownership of the job.
+12. **[new] Auto-provisioned users, no registration flow.** First
+    authenticated request upserts a `users` row from Authelia headers.
+    Friends need an Authelia account; the HR app requires nothing
+    additional from them.
 
 ---
 
@@ -860,8 +924,115 @@ vulnerability (cf. CVE-2026-30851 affecting Caddy 2.10.0–2.11.1).
 
 ---
 
+## 16. Multi-User and Permissions [planned, step 7.1]
+
+The app is built for a single owner but designed to be shareable with
+a small circle (friends). Authelia already provisions accounts — adding
+a user is an Authelia config change, no code required. The HR app's
+job is to scope data by identity and enforce a simple role model.
+
+### Identity source
+
+`Remote-User` (the Authelia username forwarded on every request) is
+the stable identity key. It is already present on `req.user` from the
+existing `autheliaIdentity` middleware. No app-level login flow is
+needed.
+
+### Data ownership model
+
+Most tables are per-user. Tags are global (shared across all users —
+see §12 decision 11).
+
+Tables receiving `user_id TEXT NOT NULL` via migration at step 7.1:
+- `sources` — each user manages their own scrape targets (`sources_002_user_id`)
+- `jobs` — discovered from their sources; cascades naturally via FK (`scraper_004_user_id`)
+- `master_resume`, `writing_samples` — personal (`resume_002_user_id`, `resume_003_user_id`)
+- `applications` — already included in the step 6 DDL; no additional migration needed
+
+Tables that remain global:
+- `tags` — shared vocabulary; any user can create or apply tags
+- `scrape_runs`, `application_events`, `retention_*` — follow their parent rows via FK
+
+### Schema additions
+
+A `users_001_init` migration creates the user registry:
+
+```sql
+CREATE TABLE users (
+  username     TEXT    PRIMARY KEY,          -- Authelia Remote-User value
+  email        TEXT,
+  display_name TEXT,
+  role         TEXT    NOT NULL DEFAULT 'user',
+                                             -- 'admin' | 'user' | 'viewer'
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT
+);
+```
+
+The `users` row is upserted on first authenticated request
+(auto-provisioning from Authelia headers), so no manual registration
+step is required when a new Authelia account is added. `last_seen_at`
+is updated on each request. The owner is seeded as `admin` at
+migration time; all subsequent auto-provisioned users default to
+`user`.
+
+### Role model
+
+Three roles, enforced by a `requireRole(role)` middleware that reads
+`req.user.username` against the `users` table:
+
+| Role | What they can do |
+|---|---|
+| `admin` | Full access to all data; assign roles via API |
+| `user` | Full access to their own data; can create and apply global tags |
+| `viewer` | Read-only on their own data; cannot enqueue generation or write tags |
+
+### Query changes
+
+Every repo query on a user-owned table gains a `WHERE user_id = ?`
+clause bound to `req.user.username`. The BullMQ job payload carries
+`user_id` so the worker loads the correct resume and writing samples
+when it picks up a job. The scrape cron query (`SELECT * FROM sources
+WHERE enabled = 1`) already scopes to each user's sources via
+`user_id` — no special handling needed.
+
+### API additions
+
+```
+GET    /api/users                    admin only; list all users + roles
+PATCH  /api/users/:username/role     admin only; { role: 'user' | 'viewer' }
+GET    /api/users/me                 current user's profile + role
+```
+
+No user-deletion endpoint — removing an Authelia account prevents
+future logins; a nightly sweep can tombstone inactive users if needed
+later.
+
+### What does NOT change
+
+- Authelia configuration is out of scope for this step; friends need
+  an Authelia account added separately before the HR app will let
+  them in.
+- The dev bypass (`dev_bypass_user`) continues to work; the bypass
+  user is seeded as `admin`.
+- No UI for role management initially — `PATCH /api/users/:username/role`
+  is sufficient for a small group; a settings page can follow in
+  step 11 polish.
+
+
+
+---
+
 ## Document changelog
 
+- **v2.1** (step 7.1 planning) — Added §16 (Multi-User and Permissions).
+  Added `user_id` to `applications` table DDL. Added migration notes
+  to `sources`, `master_resume`, and `writing_samples` table entries.
+  Inserted step 7.1 in build order; renumbered subsequent steps. Added
+  `users` module to registered modules table. Added design decisions
+  11–12. Removed redundant `user_roles` table (role is a column on
+  `users`). Fixed default role to `user` (not `viewer`) for
+  auto-provisioned accounts.
 - **v2** (after step 3.1) — Marked shipped vs planned status across
   all sections. Documented `scraper_003` columns, `jobs_001/002` tag
   tables, two-phase scrape, give-up mechanism, dual count, stats

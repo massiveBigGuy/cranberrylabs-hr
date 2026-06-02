@@ -45,12 +45,24 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
+async function requestText(path: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(path, {
+    method: 'GET',
+    headers: { Accept: 'text/plain' },
+    signal,
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
+  return res.text();
+}
+
 export const api = {
   get: <T>(path: string, signal?: AbortSignal) =>
     request<T>('GET', path, { signal }),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, { body }),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, { body }),
   delete: <T = void>(path: string) => request<T>('DELETE', path),
+  rawText: (path: string, signal?: AbortSignal) => requestText(path, signal),
 };
 
 /**
@@ -158,4 +170,47 @@ export interface ResumeVersionsResponse {
 
 export interface WritingSamplesResponse {
   samples: WritingSample[];
+}
+
+// ---------- Applications module ----------
+
+export type ApplicationStatus =
+  | 'queued'
+  | 'generating'
+  | 'ready'
+  | 'failed'
+  | 'applied'
+  | 'archived';
+
+export interface ApplicationWithJob {
+  id: number;
+  job_id: number;
+  user_id: string;
+  status: ApplicationStatus;
+  queue_job_id: string | null;
+  model_used: string | null;
+  resume_version_id: number | null;
+  resume_path: string | null;
+  cover_letter_path: string | null;
+  resume_diff: string | null;
+  generation_notes: string | null;
+  generation_error: string | null;
+  generated_at: string | null;
+  submitted_at: string | null;
+  submission_notes: string | null;
+  created_at: string;
+  updated_at: string;
+  // joined from jobs
+  job_title: string;
+  job_company: string;
+  job_url: string;
+  job_fit_score: number | null;
+}
+
+export interface ApplicationsListResponse {
+  applications: ApplicationWithJob[];
+}
+
+export interface ApplicationResponse {
+  application: ApplicationWithJob;
 }

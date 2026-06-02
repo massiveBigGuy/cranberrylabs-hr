@@ -26,6 +26,11 @@ services:
       - NODE_ENV=production
       - CONFIG_PATH=/app/config/production.yaml
       - TZ=America/Toronto
+      # Set ANTHROPIC_API_KEY in a .env file (gitignored) in this directory:
+      #   ANTHROPIC_API_KEY=sk-ant-api03-...
+      # Docker Compose reads .env automatically. The app starts cleanly without
+      # it; generation returns a clear error until the key is present.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     volumes:
       # SQLite file. Bind mount (not named volume) so it's easy to back up,
       # inspect with `sqlite3` from the host, and survive `docker compose down -v`.

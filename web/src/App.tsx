@@ -33,9 +33,16 @@ export function App() {
             >
               Resume
             </NavLink>
-            <span className="text-muted/40 cursor-not-allowed" title="Step 6">
+            <NavLink
+              to="/applications"
+              className={({ isActive }) =>
+                `transition-colors ${
+                  isActive ? 'text-ink' : 'text-muted hover:text-ink'
+                }`
+              }
+            >
               Applications
-            </span>
+            </NavLink>
             <span className="text-muted/40 cursor-not-allowed" title="Future">
               Sources
             </span>
