@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AppContext } from '../types';
 import type { LLMAdapter } from '../../services/llm';
-import { ApplicationsRepo } from './repo';
+import { ApplicationsRepo, isApplicationStatus } from './repo';
 import { ResumeRepo } from '../resume/repo';
 import { generateApplication } from './generator';
 import { bus } from '../../services/sse/bus';
@@ -22,7 +22,7 @@ export function buildApplicationsRouter(ctx: AppContext, adapter: LLMAdapter): R
       jobIdRaw !== undefined ? Number(jobIdRaw) : undefined;
 
     const list = apps.list({
-      status: status as Parameters<typeof apps.list>[0]['status'],
+      status: isApplicationStatus(status) ? status : undefined,
       jobId: Number.isInteger(jobId) && jobId! > 0 ? jobId : undefined,
     });
     res.json({ applications: list });

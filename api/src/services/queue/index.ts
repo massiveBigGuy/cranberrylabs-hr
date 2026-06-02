@@ -6,28 +6,21 @@
  * lifecycle since 4.x). This module returns *new* connections per call so
  * callers can keep their own client.
  */
-import IORedis, { type Redis } from 'ioredis';
 import { Queue, Worker, type WorkerOptions, type QueueOptions, type Processor } from 'bullmq';
 import type { AppConfig } from '../../config';
 import { createLogger } from '../logger';
 
 const log = createLogger('queue');
 
-/**
- * Build a fresh ioredis client tuned for BullMQ. The library requires:
- *   - maxRetriesPerRequest: null  (BullMQ handles its own retries)
- *   - enableReadyCheck: false     (BullMQ does its own readiness check)
- * Both are documented in BullMQ's connection guide.
- */
-export function makeRedis(config: AppConfig): Redis {
-  const client = new IORedis(config.queue.redis_url, {
-    maxRetriesPerRequest: null,
+// BullMQ v5 bundles its own ioredis internally. Passing a plain options object
+// (rather than an ioredis instance from the top-level package) avoids the
+// dual-ioredis type conflict and lets BullMQ create its own client.
+function makeConnectionOpts(config: AppConfig) {
+  return {
+    url: config.queue.redis_url,
+    maxRetriesPerRequest: null as null,
     enableReadyCheck: false,
-  });
-  client.on('error', (err) => {
-    log.error('redis error', { message: err.message });
-  });
-  return client;
+  };
 }
 
 /**
@@ -40,11 +33,10 @@ export function makeQueue<T = unknown>(
   options?: Partial<QueueOptions>,
 ): Queue<T> {
   return new Queue<T>(name, {
-    connection: makeRedis(config),
+    connection: makeConnectionOpts(config),
     defaultJobOptions: {
       attempts: config.queue.retry_attempts,
       backoff: { type: 'exponential', delay: 5_000 },
-      // Keep job records for observability but don't let them grow forever.
       removeOnComplete: { count: 200 },
       removeOnFail: { count: 200 },
     },
@@ -63,7 +55,7 @@ export function makeWorker<T = unknown, R = unknown>(
   options?: Partial<WorkerOptions>,
 ): Worker<T, R> {
   const worker = new Worker<T, R>(name, processor, {
-    connection: makeRedis(config),
+    connection: makeConnectionOpts(config),
     concurrency: config.queue.concurrency,
     ...options,
   });

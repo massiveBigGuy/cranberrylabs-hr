@@ -87,6 +87,9 @@ Generate the cover letter and tailored resume now.`;
     });
 
     const rawContent = message.content[0];
+    if (!rawContent) {
+      throw new Error('Anthropic returned an empty response');
+    }
     if (rawContent.type !== 'text') {
       throw new Error(`Unexpected content type from Anthropic: ${rawContent.type}`);
     }
