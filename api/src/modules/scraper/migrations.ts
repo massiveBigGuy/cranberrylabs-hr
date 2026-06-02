@@ -49,4 +49,12 @@ export const migrations: Migration[] = [
       db.exec(`CREATE INDEX idx_jobs_detail_fetch ON jobs(detail_fetch_status);`);
     },
   },
+  {
+    id: 'scraper_004_user_id',
+    up: (db) => {
+      // Add user_id to jobs — inherited from the source that discovered them.
+      // DEFAULT '' is backfilled by the users module init on first boot.
+      db.exec(`ALTER TABLE jobs ADD COLUMN user_id TEXT NOT NULL DEFAULT '';`);
+    },
+  },
 ];

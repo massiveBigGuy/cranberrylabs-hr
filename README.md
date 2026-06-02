@@ -85,14 +85,14 @@ and the UI can lean on ranked sort instead.
 - [x] **Step 3.1 — Detail-sweep give-up, dual count, stats panel.**
   Resolves a week-long retry loop, makes the filter gap legible, adds
   read-only DB breakdown for diagnostics.
-- [ ] **Step 4 — Fit scoring v1.** Cheap keyword-based score computed
+- [x] **Step 4 — Fit scoring v1.** Cheap keyword-based score computed
   at ingestion, the `/refit` endpoint, sort-by-fit on the list view.
-- [ ] **Step 5 — Master resume + writing samples.** Structured JSON
+- [x] **Step 5 — Master resume + writing samples.** Structured JSON
   resume editor, writing samples for voice calibration, version
   history.
-- [ ] **Step 6 — Single generation path.** Anthropic adapter, "Generate"
+- [x] **Step 6 — Single generation path.** Anthropic adapter, "Generate"
   action on one job, tailored resume + cover letter saved to disk.
-- [ ] **Step 7 — Queue + concurrency.** Batch selection, BullMQ worker
+- [x] **Step 7 — Queue + concurrency.** Batch selection, BullMQ worker
   pool, SSE-driven queue status component.
 - [ ] **Step 8 — Ollama adapter + model toggle.** Local generation
   path, UI switch between API and local.
@@ -115,24 +115,10 @@ Items that aren't blocking but should be revisited:
   cookie correctly. Not investigated yet — the auth wall works, it
   just nags more than it should. Likely a 15-minute fix once
   someone sits down with it.
+- **Stale status indicator after application deletion** Status is not reset after an application is deleted from 'ready' to
+  the default setting in the database. It must be manually set to reviewing 
+  or another status option.
 
-- **The `node:timers/promises` import shows an IDE error on the dev
-  PC.** TypeScript can't find `@types/node` in the local workspace
-  because nothing Node-related is installed on the dev machine. The
-  Docker build has it and compiles fine. Cosmetic until someone wants
-  to run typecheck on the host.
-
-- **GM postings 322 and 327 are permanently `gave_up`.** Workday
-  returns 403 on those specific detail URLs. They appear in the
-  list with no description — the drawer's existing fallback covers
-  it. If a "retry detail fetch" button is ever wanted, the path is:
-  reset `detail_fetch_attempts = 0, detail_fetch_status = 'pending'`
-  on the row; no schema change needed.
-
-- **Result-count duplication on the Jobs page.** The dual count
-  ("25 of 845 jobs") and the older "25 jobs matching" line are both
-  rendering. One block in `web/src/pages/JobsPage.tsx` needs to be
-  removed — keep the "X of Y" version, drop the "matching" version.
 
 ## Layout
 

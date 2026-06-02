@@ -2,10 +2,11 @@ import type { DB } from '../../services/db';
 
 export interface MasterResumeRow {
   id: number;
+  user_id: string;
   version: number;
-  content: string;  // structured JSON — see §6 of schema-v2.md
+  content: string;
   notes: string | null;
-  is_active: number;  // 0 | 1 — SQLite has no boolean
+  is_active: number;  // 0 | 1
   created_at: string;
 }
 
@@ -18,6 +19,7 @@ export function isWritingSampleKind(s: unknown): s is WritingSampleKind {
 
 export interface WritingSampleRow {
   id: number;
+  user_id: string;
   label: string;
   kind: string;
   content: string;
@@ -28,6 +30,7 @@ export interface WritingSampleRow {
 export class ResumeRepo {
   constructor(private readonly db: DB) {}
 
+  // Unscoped — used by the worker to load a pinned resume version by ID.
   getById(id: number): MasterResumeRow | null {
     return (
       (this.db
@@ -36,40 +39,44 @@ export class ResumeRepo {
     );
   }
 
-  getActive(): MasterResumeRow | null {
+  getActive(userId: string): MasterResumeRow | null {
     return (
       (this.db
-        .prepare('SELECT * FROM master_resume WHERE is_active = 1')
-        .get() as MasterResumeRow | undefined) ?? null
+        .prepare('SELECT * FROM master_resume WHERE is_active = 1 AND user_id = ?')
+        .get(userId) as MasterResumeRow | undefined) ?? null
     );
   }
 
-  listVersions(): MasterResumeRow[] {
+  listVersions(userId: string): MasterResumeRow[] {
     return this.db
-      .prepare('SELECT * FROM master_resume ORDER BY version DESC')
-      .all() as MasterResumeRow[];
+      .prepare('SELECT * FROM master_resume WHERE user_id = ? ORDER BY version DESC')
+      .all(userId) as MasterResumeRow[];
   }
 
-  create(content: string, notes: string | null): MasterResumeRow {
+  create(content: string, notes: string | null, userId: string): MasterResumeRow {
     const { v } = this.db
-      .prepare('SELECT COALESCE(MAX(version), 0) AS v FROM master_resume')
-      .get() as { v: number };
+      .prepare('SELECT COALESCE(MAX(version), 0) AS v FROM master_resume WHERE user_id = ?')
+      .get(userId) as { v: number };
     return this.db
       .prepare(
-        'INSERT INTO master_resume (version, content, notes, is_active) VALUES (?, ?, ?, 0) RETURNING *',
+        'INSERT INTO master_resume (user_id, version, content, notes, is_active) VALUES (?, ?, ?, ?, 0) RETURNING *',
       )
-      .get(v + 1, content, notes ?? null) as MasterResumeRow;
+      .get(userId, v + 1, content, notes ?? null) as MasterResumeRow;
   }
 
-  activate(id: number): MasterResumeRow | null {
+  activate(id: number, userId: string): MasterResumeRow | null {
     const exists = this.db
-      .prepare('SELECT id FROM master_resume WHERE id = ?')
-      .get(id) as { id: number } | undefined;
+      .prepare('SELECT id FROM master_resume WHERE id = ? AND user_id = ?')
+      .get(id, userId) as { id: number } | undefined;
     if (!exists) return null;
 
     const tx = this.db.transaction(() => {
-      this.db.prepare('UPDATE master_resume SET is_active = 0').run();
-      this.db.prepare('UPDATE master_resume SET is_active = 1 WHERE id = ?').run(id);
+      this.db
+        .prepare('UPDATE master_resume SET is_active = 0 WHERE user_id = ?')
+        .run(userId);
+      this.db
+        .prepare('UPDATE master_resume SET is_active = 1 WHERE id = ?')
+        .run(id);
     });
     tx();
 
@@ -80,27 +87,28 @@ export class ResumeRepo {
 
   // --- Writing samples ---
 
-  listWritingSamples(): WritingSampleRow[] {
+  listWritingSamples(userId: string): WritingSampleRow[] {
     return this.db
-      .prepare('SELECT * FROM writing_samples ORDER BY created_at DESC')
-      .all() as WritingSampleRow[];
+      .prepare('SELECT * FROM writing_samples WHERE user_id = ? ORDER BY created_at DESC')
+      .all(userId) as WritingSampleRow[];
   }
 
-  createWritingSample(label: string, kind: string, content: string): WritingSampleRow {
+  createWritingSample(label: string, kind: string, content: string, userId: string): WritingSampleRow {
     return this.db
       .prepare(
-        'INSERT INTO writing_samples (label, kind, content) VALUES (?, ?, ?) RETURNING *',
+        'INSERT INTO writing_samples (user_id, label, kind, content) VALUES (?, ?, ?, ?) RETURNING *',
       )
-      .get(label, kind, content) as WritingSampleRow;
+      .get(userId, label, kind, content) as WritingSampleRow;
   }
 
   updateWritingSample(
     id: number,
     patch: { label?: string; kind?: string; content?: string; active?: number },
+    userId: string,
   ): WritingSampleRow | null {
     const existing = this.db
-      .prepare('SELECT * FROM writing_samples WHERE id = ?')
-      .get(id) as WritingSampleRow | undefined;
+      .prepare('SELECT * FROM writing_samples WHERE id = ? AND user_id = ?')
+      .get(id, userId) as WritingSampleRow | undefined;
     if (!existing) return null;
 
     const label = patch.label ?? existing.label;
@@ -119,8 +127,10 @@ export class ResumeRepo {
       .get(id) as WritingSampleRow;
   }
 
-  deleteWritingSample(id: number): boolean {
-    const result = this.db.prepare('DELETE FROM writing_samples WHERE id = ?').run(id);
+  deleteWritingSample(id: number, userId: string): boolean {
+    const result = this.db
+      .prepare('DELETE FROM writing_samples WHERE id = ? AND user_id = ?')
+      .run(id, userId);
     return result.changes > 0;
   }
 }

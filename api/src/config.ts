@@ -24,6 +24,7 @@ export interface AppConfig {
   };
   notifications: { on_queue_complete: boolean; channels: unknown[] };
   auth: { dev_bypass_user: string | null };
+  users?: { initial_admin?: string | null };
 }
 
 function deepMerge<T>(base: T, override: Partial<T>): T {

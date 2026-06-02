@@ -6,6 +6,7 @@ import { openDatabase, closeDatabase } from './services/db';
 import { createLogger } from './services/logger';
 import { sseHandler } from './services/sse/handler';
 import { makeAutheliaIdentity } from './middleware/authelia';
+import { makeUserProvisioner } from './middleware/userProvisioner';
 import { loadModules } from './modules/loader';
 import type { AppContext } from './modules/types';
 import { ServiceRegistry } from './modules/services-registry';
@@ -28,6 +29,7 @@ async function main() {
   // Auth middleware applies to everything under /api. SSE included — the
   // dashboard subscribes after the user has authenticated.
   app.use('/api', makeAutheliaIdentity(config));
+  app.use('/api', makeUserProvisioner(db));
 
   // SSE endpoint per §4. Heartbeats prove the pipe is live even before any
   // module emits domain events.

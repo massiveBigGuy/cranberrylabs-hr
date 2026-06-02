@@ -2,37 +2,21 @@ import { Router } from 'express';
 import type { AppContext } from '../types';
 import { ResumeRepo, isWritingSampleKind } from './repo';
 
-/**
- * Builds the /api/resume router. Endpoints per §4 of schema-v2.md:
- *
- *   GET    /api/resume                          active master_resume (or null)
- *   GET    /api/resume/versions                 full version history
- *   POST   /api/resume                          create new version
- *   PATCH  /api/resume/:id/activate             switch active version
- *   GET    /api/resume/writing-samples          all writing samples
- *   POST   /api/resume/writing-samples          create sample
- *   PATCH  /api/resume/writing-samples/:id      update sample
- *   DELETE /api/resume/writing-samples/:id      remove sample
- *
- * Route ordering: static paths (/versions, /writing-samples) registered
- * before parametric ones (/:id/activate, /writing-samples/:id) so the
- * string literals aren't swallowed by wildcards.
- */
 export function buildResumeRouter(ctx: AppContext): Router {
   const router = Router();
   const repo = new ResumeRepo(ctx.db);
 
-  // GET /api/resume — active version, or null if none exists yet
-  router.get('/', (_req, res) => {
-    res.json({ resume: repo.getActive() });
+  // GET /api/resume — active version for the requesting user, or null
+  router.get('/', (req, res) => {
+    res.json({ resume: repo.getActive(req.user!.username) });
   });
 
   // GET /api/resume/versions — full history, newest first
-  router.get('/versions', (_req, res) => {
-    res.json({ versions: repo.listVersions() });
+  router.get('/versions', (req, res) => {
+    res.json({ versions: repo.listVersions(req.user!.username) });
   });
 
-  // POST /api/resume — create new version (content must be valid JSON)
+  // POST /api/resume — create new version
   router.post('/', (req, res) => {
     const body = (req.body ?? {}) as { content?: unknown; notes?: unknown };
     if (typeof body.content !== 'string' || !body.content.trim()) {
@@ -47,7 +31,7 @@ export function buildResumeRouter(ctx: AppContext): Router {
     }
     const notes =
       typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null;
-    const resume = repo.create(body.content.trim(), notes);
+    const resume = repo.create(body.content.trim(), notes, req.user!.username);
     res.status(201).json({ resume });
   });
 
@@ -58,7 +42,7 @@ export function buildResumeRouter(ctx: AppContext): Router {
       res.status(400).json({ error: 'invalid id' });
       return;
     }
-    const resume = repo.activate(id);
+    const resume = repo.activate(id, req.user!.username);
     if (!resume) {
       res.status(404).json({ error: 'not found' });
       return;
@@ -67,11 +51,11 @@ export function buildResumeRouter(ctx: AppContext): Router {
   });
 
   // GET /api/resume/writing-samples
-  router.get('/writing-samples', (_req, res) => {
-    res.json({ samples: repo.listWritingSamples() });
+  router.get('/writing-samples', (req, res) => {
+    res.json({ samples: repo.listWritingSamples(req.user!.username) });
   });
 
-  // POST /api/resume/writing-samples — { label, kind, content }
+  // POST /api/resume/writing-samples
   router.post('/writing-samples', (req, res) => {
     const body = (req.body ?? {}) as { label?: unknown; kind?: unknown; content?: unknown };
     if (typeof body.label !== 'string' || !body.label.trim()) {
@@ -86,11 +70,16 @@ export function buildResumeRouter(ctx: AppContext): Router {
       res.status(400).json({ error: 'content required' });
       return;
     }
-    const sample = repo.createWritingSample(body.label.trim(), body.kind, body.content);
+    const sample = repo.createWritingSample(
+      body.label.trim(),
+      body.kind,
+      body.content,
+      req.user!.username,
+    );
     res.status(201).json({ sample });
   });
 
-  // PATCH /api/resume/writing-samples/:id — partial update
+  // PATCH /api/resume/writing-samples/:id
   router.patch('/writing-samples/:id', (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -130,7 +119,7 @@ export function buildResumeRouter(ctx: AppContext): Router {
       patch.active = body.active ? 1 : 0;
     }
 
-    const sample = repo.updateWritingSample(id, patch);
+    const sample = repo.updateWritingSample(id, patch, req.user!.username);
     if (!sample) {
       res.status(404).json({ error: 'not found' });
       return;
@@ -145,7 +134,7 @@ export function buildResumeRouter(ctx: AppContext): Router {
       res.status(400).json({ error: 'invalid id' });
       return;
     }
-    if (!repo.deleteWritingSample(id)) {
+    if (!repo.deleteWritingSample(id, req.user!.username)) {
       res.status(404).json({ error: 'not found' });
       return;
     }

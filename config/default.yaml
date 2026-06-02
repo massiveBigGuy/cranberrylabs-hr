@@ -51,3 +51,8 @@ notifications:
 # In dev, set auth.dev_bypass_user to skip the middleware reject.
 auth:
   dev_bypass_user: null         # set to e.g. 'dev' to bypass in local dev
+
+users:
+  # Username to seed as admin on first boot. Falls back to auth.dev_bypass_user
+  # in dev. Set this in config/production.yaml to your Authelia username.
+  initial_admin: null

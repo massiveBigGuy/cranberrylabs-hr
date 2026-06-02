@@ -25,4 +25,16 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 'resume_002_user_id',
+    up: (db) => {
+      db.exec(`ALTER TABLE master_resume ADD COLUMN user_id TEXT NOT NULL DEFAULT '';`);
+    },
+  },
+  {
+    id: 'resume_003_user_id',
+    up: (db) => {
+      db.exec(`ALTER TABLE writing_samples ADD COLUMN user_id TEXT NOT NULL DEFAULT '';`);
+    },
+  },
 ];

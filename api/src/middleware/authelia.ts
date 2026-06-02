@@ -6,6 +6,7 @@ export interface AutheliaUser {
   email?: string;
   name?: string;
   groups: string[];
+  role?: string;  // populated by userProvisioner middleware
 }
 
 declare global {

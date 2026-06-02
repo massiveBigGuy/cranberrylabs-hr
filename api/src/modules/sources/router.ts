@@ -6,11 +6,6 @@ import { parseWorkdayUrl } from '../scraper/url-parser';
 import type { ScrapeJobData } from '../scraper/worker';
 import { ScrapeRunsRepo } from '../scraper/repo-runs';
 
-/**
- * Build the sources router. The queue is passed in so the route handler
- * can enqueue scrape jobs; the queue itself is owned by the scraper
- * module's init hook and shared via the registry's wiring step.
- */
 export function buildSourcesRouter(
   ctx: AppContext,
   getScrapeQueue: () => Queue<ScrapeJobData>,
@@ -19,39 +14,33 @@ export function buildSourcesRouter(
   const sources = new SourcesRepo(ctx.db);
   const runs = new ScrapeRunsRepo(ctx.db);
 
-  /**
-   * GET /api/sources — list all configured sources.
-   */
-  router.get('/', (_req, res) => {
-    res.json({ sources: sources.list() });
+  router.get('/', (req, res) => {
+    res.json({ sources: sources.list(req.user!.username) });
   });
 
-  /**
-   * POST /api/sources — add a new source. Validates the URL synchronously;
-   * if it's a Workday URL it's normalized to the canonical form. On
-   * success, enqueues a probe job — caller doesn't wait for the probe.
-   *
-   * Body: { company_name, platform, tenant_url, search_params? }
-   */
   router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const userId = req.user!.username;
       const { company_name, platform, tenant_url, search_params } = req.body ?? {};
       const v = validateNewSource({ company_name, platform, tenant_url });
       if (!v.ok) {
         res.status(400).json({ error: v.error });
         return;
       }
-      if (sources.findByTenantUrl(v.tenant_url)) {
+      if (sources.findByTenantUrl(v.tenant_url, userId)) {
         res.status(409).json({ error: 'a source with this tenant_url already exists' });
         return;
       }
 
-      const row = sources.insert({
-        company_name: v.company_name,
-        platform: v.platform,
-        tenant_url: v.tenant_url,
-        search_params: search_params ?? null,
-      });
+      const row = sources.insert(
+        {
+          company_name: v.company_name,
+          platform: v.platform,
+          tenant_url: v.tenant_url,
+          search_params: search_params ?? null,
+        },
+        userId,
+      );
 
       await getScrapeQueue().add('probe', { source_id: row.id, mode: 'probe' });
 
@@ -68,7 +57,7 @@ export function buildSourcesRouter(
       return;
     }
     const row = sources.get(id);
-    if (!row) {
+    if (!row || row.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }
@@ -81,7 +70,8 @@ export function buildSourcesRouter(
       res.status(400).json({ error: 'invalid id' });
       return;
     }
-    if (!sources.get(id)) {
+    const existing = sources.get(id);
+    if (!existing || existing.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }
@@ -100,11 +90,12 @@ export function buildSourcesRouter(
       res.status(400).json({ error: 'invalid id' });
       return;
     }
-    const removed = sources.delete(id);
-    if (!removed) {
+    const existing = sources.get(id);
+    if (!existing || existing.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }
+    sources.delete(id);
     res.status(204).end();
   });
 
@@ -116,7 +107,7 @@ export function buildSourcesRouter(
         return;
       }
       const source = sources.get(id);
-      if (!source) {
+      if (!source || source.user_id !== req.user!.username) {
         res.status(404).json({ error: 'not found' });
         return;
       }
@@ -138,7 +129,7 @@ export function buildSourcesRouter(
         return;
       }
       const source = sources.get(id);
-      if (!source) {
+      if (!source || source.user_id !== req.user!.username) {
         res.status(404).json({ error: 'not found' });
         return;
       }
@@ -155,7 +146,8 @@ export function buildSourcesRouter(
       res.status(400).json({ error: 'invalid id' });
       return;
     }
-    if (!sources.get(id)) {
+    const source = sources.get(id);
+    if (!source || source.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }

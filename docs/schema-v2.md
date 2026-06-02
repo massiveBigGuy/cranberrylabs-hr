@@ -37,7 +37,7 @@ Build-order progress:
 - [x] Step 5 — Master resume + writing samples
 - [x] Step 6 — Single generation (Anthropic adapter)
 - [x] Step 7 — Queue + concurrency
-- [ ] Step 7.1 — Multi-user + permissions
+- [x] Step 7.1 — Multi-user + permissions
 - [ ] Step 8 — Ollama adapter + model toggle
 - [ ] Step 9 — Notifications
 - [ ] Step 10 — Retention
@@ -724,7 +724,7 @@ Annotated with current status:
    to disk. Review UI shows the diff.
 8. [x] **Step 7 — BullMQ queue + worker concurrency.** Batch select
    multiple jobs, watch the queue drain. SSE-driven progress.
-9. [ ] **Step 7.1 — Multi-user + permissions.** Add `user_id` to all
+9. [x] **Step 7.1 — Multi-user + permissions.** Add `user_id` to all
    owned tables via migrations, scope all repo queries, wire up the
    `users` table and `requireRole` middleware, and add the `/api/users`
    surface. See §16.

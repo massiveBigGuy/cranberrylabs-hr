@@ -27,4 +27,12 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 'sources_002_user_id',
+    up: (db) => {
+      // Scope sources to their owners. DEFAULT '' so existing rows get a
+      // placeholder that the users module init backfills on first boot.
+      db.exec(`ALTER TABLE sources ADD COLUMN user_id TEXT NOT NULL DEFAULT '';`);
+    },
+  },
 ];

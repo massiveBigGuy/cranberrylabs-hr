@@ -21,11 +21,13 @@ export function buildApplicationsRouter(
 
   // GET /api/applications — list; optional ?status= and ?job_id=
   router.get('/', (req, res) => {
+    const userId = req.user!.username;
     const status = typeof req.query.status === 'string' ? req.query.status : undefined;
     const jobIdRaw = req.query.job_id;
     const jobId = jobIdRaw !== undefined ? Number(jobIdRaw) : undefined;
 
     const list = apps.list({
+      userId,
       status: isApplicationStatus(status) ? status : undefined,
       jobId: Number.isInteger(jobId) && jobId! > 0 ? jobId : undefined,
     });
@@ -34,6 +36,7 @@ export function buildApplicationsRouter(
 
   // POST /api/applications — enqueue generation for a job (returns 202 immediately)
   router.post('/', async (req, res) => {
+    const userId = req.user!.username;
     const rawId = req.body?.job_id;
     const jobId = typeof rawId === 'number' ? rawId : Number(rawId);
     if (!Number.isInteger(jobId) || jobId <= 0) {
@@ -41,7 +44,7 @@ export function buildApplicationsRouter(
       return;
     }
 
-    const existing = apps.getByJobId(jobId);
+    const existing = apps.getByJobId(jobId, userId);
     if (existing) {
       res.status(409).json({
         error: 'an application already exists for this job',
@@ -50,7 +53,7 @@ export function buildApplicationsRouter(
       return;
     }
 
-    const activeResume = resume.getActive();
+    const activeResume = resume.getActive(userId);
     if (!activeResume) {
       res.status(400).json({
         error: 'no active master resume — add one at /resume before generating',
@@ -58,9 +61,10 @@ export function buildApplicationsRouter(
       return;
     }
 
+    // Validate the job belongs to this user.
     const jobRow = ctx.db
-      .prepare('SELECT id, title, company, description FROM jobs WHERE id = ?')
-      .get(jobId) as
+      .prepare('SELECT id, title, company, description FROM jobs WHERE id = ? AND user_id = ?')
+      .get(jobId, userId) as
       | { id: number; title: string; company: string; description: string }
       | undefined;
 
@@ -75,7 +79,6 @@ export function buildApplicationsRouter(
       return;
     }
 
-    const userId = req.user?.username ?? 'unknown';
     const app = apps.create(jobId, userId, activeResume.id);
 
     const bullJob = await generationQueue.add('generate', {
@@ -126,7 +129,7 @@ export function buildApplicationsRouter(
       return;
     }
     const app = apps.get(id);
-    if (!app) {
+    if (!app || app.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }
@@ -141,7 +144,7 @@ export function buildApplicationsRouter(
       return;
     }
     const app = apps.get(id);
-    if (!app) {
+    if (!app || app.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }
@@ -168,7 +171,7 @@ export function buildApplicationsRouter(
       return;
     }
     const app = apps.get(id);
-    if (!app) {
+    if (!app || app.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }
@@ -195,7 +198,7 @@ export function buildApplicationsRouter(
       return;
     }
     const app = apps.get(id);
-    if (!app) {
+    if (!app || app.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }
@@ -234,7 +237,7 @@ export function buildApplicationsRouter(
       return;
     }
     const app = apps.get(id);
-    if (!app) {
+    if (!app || app.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }
@@ -257,7 +260,8 @@ export function buildApplicationsRouter(
       res.status(400).json({ error: 'invalid id' });
       return;
     }
-    if (!apps.get(id)) {
+    const app = apps.get(id);
+    if (!app || app.user_id !== req.user!.username) {
       res.status(404).json({ error: 'not found' });
       return;
     }
@@ -268,6 +272,15 @@ export function buildApplicationsRouter(
     }
 
     apps.delete(id);
+
+    // Reset job status back to reviewing if the application workflow had advanced it.
+    ctx.db
+      .prepare(
+        `UPDATE jobs SET status = 'reviewing'
+         WHERE id = ? AND status IN ('queued', 'generating', 'ready')`,
+      )
+      .run(app.job_id);
+
     res.status(204).end();
   });
 

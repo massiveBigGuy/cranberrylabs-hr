@@ -47,10 +47,10 @@ export function buildGenerationWorker(
       // resume update between enqueue and processing doesn't silently change output.
       const resumeRow = appRow.resume_version_id
         ? resume.getById(appRow.resume_version_id)
-        : resume.getActive();
+        : resume.getActive(userId);
       if (!resumeRow) throw new Error('Master resume not found');
 
-      const samples = resume.listWritingSamples();
+      const samples = resume.listWritingSamples(userId);
 
       const output = await generateApplication(
         applicationId,

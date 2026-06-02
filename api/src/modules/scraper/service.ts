@@ -100,7 +100,7 @@ export class ScraperService {
       // too once we have them.
       const filtered = applyGlobalFilters(jobs, filters);
 
-      const { inserted, existed } = this.jobs.upsertMany(sourceId, filtered);
+      const { inserted, existed } = this.jobs.upsertMany(sourceId, source.user_id, filtered);
       this.runs.finishOk(run.id, filtered.length, inserted);
       this.sources.recordProbeResult(sourceId, {
         last_status: 'ok',

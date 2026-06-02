@@ -5,6 +5,7 @@ export type SourceStatus = 'ok' | 'blocked' | 'error' | null;
 
 export interface SourceRow {
   id: number;
+  user_id: string;
   company_name: string;
   platform: Platform;
   tenant_url: string;
@@ -39,10 +40,10 @@ export interface ProbeResultUpdate {
 export class SourcesRepo {
   constructor(private readonly db: DB) {}
 
-  list(): SourceRow[] {
+  list(userId: string): SourceRow[] {
     return this.db
-      .prepare('SELECT * FROM sources ORDER BY company_name ASC')
-      .all() as SourceRow[];
+      .prepare('SELECT * FROM sources WHERE user_id = ? ORDER BY company_name ASC')
+      .all(userId) as SourceRow[];
   }
 
   get(id: number): SourceRow | null {
@@ -52,18 +53,18 @@ export class SourcesRepo {
     );
   }
 
-  findByTenantUrl(url: string): SourceRow | null {
+  findByTenantUrl(url: string, userId: string): SourceRow | null {
     return (
-      (this.db.prepare('SELECT * FROM sources WHERE tenant_url = ?').get(url) as
-        | SourceRow
-        | undefined) ?? null
+      (this.db
+        .prepare('SELECT * FROM sources WHERE tenant_url = ? AND user_id = ?')
+        .get(url, userId) as SourceRow | undefined) ?? null
     );
   }
 
-  insert(input: NewSourceInput): SourceRow {
+  insert(input: NewSourceInput, userId: string): SourceRow {
     const stmt = this.db.prepare(`
-      INSERT INTO sources (company_name, platform, tenant_url, search_params)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO sources (company_name, platform, tenant_url, search_params, user_id)
+      VALUES (?, ?, ?, ?, ?)
       RETURNING *
     `);
     return stmt.get(
@@ -71,6 +72,7 @@ export class SourcesRepo {
       input.platform,
       input.tenant_url,
       input.search_params == null ? null : JSON.stringify(input.search_params),
+      userId,
     ) as SourceRow;
   }
 

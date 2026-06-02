@@ -85,7 +85,14 @@ export class ApplicationsRepo {
     );
   }
 
-  getByJobId(jobId: number): ApplicationWithJob | null {
+  getByJobId(jobId: number, userId?: string): ApplicationWithJob | null {
+    if (userId !== undefined) {
+      return (
+        (this.db
+          .prepare(`${JOINED_SELECT} WHERE a.job_id = ? AND a.user_id = ?`)
+          .get(jobId, userId) as ApplicationWithJob | undefined) ?? null
+      );
+    }
     return (
       (this.db
         .prepare(`${JOINED_SELECT} WHERE a.job_id = ?`)
@@ -96,10 +103,15 @@ export class ApplicationsRepo {
   list({
     status,
     jobId,
-  }: { status?: ApplicationStatus; jobId?: number } = {}): ApplicationWithJob[] {
+    userId,
+  }: { status?: ApplicationStatus; jobId?: number; userId?: string } = {}): ApplicationWithJob[] {
     const conditions: string[] = [];
     const params: unknown[] = [];
 
+    if (userId !== undefined) {
+      conditions.push('a.user_id = ?');
+      params.push(userId);
+    }
     if (status) {
       conditions.push('a.status = ?');
       params.push(status);

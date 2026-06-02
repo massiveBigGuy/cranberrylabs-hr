@@ -18,6 +18,7 @@ import { scraperModule } from './scraper';
 import { jobsModule } from './jobs';
 import { resumeModule } from './resume';
 import { applicationsModule } from './applications';
+import { usersModule } from './users';
 
 export const modules: Module[] = [
   sourcesModule,
@@ -25,6 +26,7 @@ export const modules: Module[] = [
   jobsModule,
   resumeModule,
   applicationsModule,
+  usersModule,   // last: seeds admin + backfills user_id after all other migrations
   // Future, added in their respective build-order steps:
   //   notificationsModule,  — step 9
   //   retentionModule,      — step 10

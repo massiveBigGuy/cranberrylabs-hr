@@ -4,6 +4,7 @@ import type { NormalizedJob } from './adapters/types';
 export interface JobRow {
   id: number;
   source_id: number;
+  user_id: string;
   external_id: string;
   title: string;
   company: string;
@@ -43,14 +44,14 @@ export class JobsRepo {
    * Returns the count of new vs existing so the scrape_run row can report
    * jobs_new accurately.
    */
-  upsertMany(sourceId: number, jobs: NormalizedJob[]): UpsertResult {
+  upsertMany(sourceId: number, userId: string, jobs: NormalizedJob[]): UpsertResult {
     const stmt = this.db.prepare(`
       INSERT INTO jobs (
-        source_id, external_id, title, company, location, remote_type,
+        source_id, user_id, external_id, title, company, location, remote_type,
         url, description, description_hash, posted_date,
         salary_min, salary_max, salary_currency
       ) VALUES (
-        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         ?, ?, ?
       )
@@ -62,6 +63,7 @@ export class JobsRepo {
       for (const j of items) {
         const info = stmt.run(
           sourceId,
+          userId,
           j.external_id,
           j.title,
           j.company,
@@ -84,15 +86,7 @@ export class JobsRepo {
 
   /**
    * Find jobs that still need their full description fetched. Used by the
-   * phase-2 detail-fetch worker.
-   *
-   * Limit lets the cron task cap how many it processes per run, so it
-   * spreads out polite request pacing rather than firing a thundering herd.
-   *
-   * Excludes jobs the sweep has given up on (detail_fetch_status =
-   * 'gave_up') and jobs that have hit the attempt ceiling — the
-   * attempt-count check is belt-and-suspenders against a status write
-   * that never landed. Either condition alone is sufficient.
+   * phase-2 detail-fetch worker. System operation — not scoped to a user.
    */
   findMissingDescriptions(limit: number, maxAttempts: number): JobRow[] {
     return this.db
@@ -169,5 +163,4 @@ export class JobsRepo {
     }
     return { attempts: row.detail_fetch_attempts, gaveUp };
   }
-
 }
