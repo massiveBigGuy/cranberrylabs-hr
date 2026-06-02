@@ -137,21 +137,30 @@ export const resumeModule: Module = {
 
     const repo = new ResumeRepo(ctx.db);
 
-    // Seed initial resume if the table is empty.
-    const active = repo.getActive();
-    if (!active) {
-      const resume = repo.create(SEED_RESUME, 'initial import');
-      repo.activate(resume.id);
+    // Seed initial resume if the table is empty. Use '' as the seed userId —
+    // the users module backfill (which runs after all module inits) will update
+    // it to the configured initial_admin username. The check is unscoped so it
+    // doesn't re-seed on subsequent boots after the backfill runs.
+    const seedUserId = '';
+    const anyActive = ctx.db
+      .prepare('SELECT id FROM master_resume WHERE is_active = 1 LIMIT 1')
+      .get();
+    if (!anyActive) {
+      const resume = repo.create(SEED_RESUME, 'initial import', seedUserId);
+      repo.activate(resume.id, seedUserId);
       ctx.logger.info('resume: seeded initial master resume');
     }
 
     // Seed initial writing sample if none exist.
-    const samples = repo.listWritingSamples();
-    if (samples.length === 0) {
+    const { c } = ctx.db
+      .prepare('SELECT COUNT(*) AS c FROM writing_samples')
+      .get() as { c: number };
+    if (c === 0) {
       repo.createWritingSample(
         'Cover letter — IT support / sysadmin',
         'cover_letter',
         SEED_COVER_LETTER,
+        seedUserId,
       );
       ctx.logger.info('resume: seeded initial writing sample');
     }

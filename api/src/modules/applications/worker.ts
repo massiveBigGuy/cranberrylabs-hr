@@ -27,7 +27,7 @@ export function buildGenerationWorker(
   const worker = makeWorker<GenerationJobData, void>(
     GENERATION_QUEUE_NAME,
     async (job: Job<GenerationJobData>) => {
-      const { applicationId, jobId } = job.data;
+      const { applicationId, jobId, userId } = job.data;
 
       apps.updateStatus(applicationId, 'generating');
       bus.publish('application.started', { applicationId, jobId });

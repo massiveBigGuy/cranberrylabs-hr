@@ -25,7 +25,7 @@ export function buildUsersRouter(ctx: AppContext): Router {
 
   // PATCH /api/users/:username/role — admin only; assign role
   router.patch('/:username/role', requireRole('admin'), (req, res) => {
-    const { username } = req.params;
+    const username = String(req.params.username);
     const { role } = req.body ?? {};
     if (!isUserRole(role)) {
       res.status(400).json({ error: 'role must be admin, user, or viewer' });
