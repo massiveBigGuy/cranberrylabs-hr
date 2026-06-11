@@ -4,7 +4,6 @@ import {
   api,
   type Source,
   type SourcesListResponse,
-  type Profile,
   type ProfilesListResponse,
 } from '../lib/api';
 
