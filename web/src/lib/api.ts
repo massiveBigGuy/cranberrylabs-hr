@@ -138,6 +138,24 @@ export interface JobDetailResponse {
   tags: Tag[];
 }
 
+// ---------- Profiles module ----------
+
+export interface Profile {
+  id: number;
+  user_id: string;
+  name: string;
+  target_keywords: string | null;
+  excluded_keywords: string | null;
+  resume_version_id: number | null;
+  is_default: number; // 0 | 1
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProfilesListResponse {
+  profiles: Profile[];
+}
+
 // ---------- Resume module ----------
 
 export type WritingSampleKind = 'cover_letter' | 'email' | 'bio' | 'other';

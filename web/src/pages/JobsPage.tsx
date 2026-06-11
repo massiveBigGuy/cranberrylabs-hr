@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, qs, type JobsListResponse } from '../lib/api';
+import { api, qs, type JobsListResponse, type ProfilesListResponse } from '../lib/api';
 import { JobList } from '../components/JobList';
 import { JobDetailDrawer } from '../components/JobDetailDrawer';
 import { JobStatsPanel } from '../components/JobStatsPanel';
@@ -15,7 +15,14 @@ export function JobsPage() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'fit' | 'date'>('fit');
+  const [profileId, setProfileId] = useState<number | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<number>>(new Set());
+
+  const profilesQuery = useQuery({
+    queryKey: ['profiles'],
+    queryFn: ({ signal }) => api.get<ProfilesListResponse>('/api/profiles', signal),
+  });
+  const profiles = profilesQuery.data?.profiles ?? [];
 
   const sinceIso =
     sinceDays === null
@@ -23,7 +30,7 @@ export function JobsPage() {
       : new Date(Date.now() - sinceDays * 86_400_000).toISOString().slice(0, 10);
 
   const query = useQuery({
-    queryKey: ['jobs', { since: sinceIso, search, sortBy }],
+    queryKey: ['jobs', { since: sinceIso, search, sortBy, profileId }],
     queryFn: ({ signal }) =>
       api.get<JobsListResponse>(
         '/api/jobs' +
@@ -31,6 +38,7 @@ export function JobsPage() {
             since: sinceIso,
             search,
             sort: sortBy,
+            profile_id: profileId ?? undefined,
             limit: 100,
           }),
         signal,
@@ -93,6 +101,21 @@ export function JobsPage() {
           className="text-sm px-3 py-1.5 rounded bg-surface border border-surface text-ink w-64"
         />
 
+        {profiles.length > 1 && (
+          <select
+            value={profileId ?? ''}
+            onChange={(e) => setProfileId(e.target.value === '' ? null : Number(e.target.value))}
+            className="text-sm px-2 py-1.5 rounded bg-surface border border-surface text-ink"
+          >
+            <option value="">All profiles</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        )}
+
         <div className="flex items-center gap-1 text-xs">
           <DateFilterButton label="24h" active={sinceDays === 1} onClick={() => setSinceDays(1)} />
           <DateFilterButton label="7d"  active={sinceDays === 7} onClick={() => setSinceDays(7)} />
@@ -139,6 +162,7 @@ export function JobsPage() {
           {query.data.total_unfiltered === 1 ? 'job' : 'jobs'}
           {sinceDays !== null && ` · last ${sinceDays}d`}
           {search && ` · "${search}"`}
+          {profileId !== null && ` · ${profiles.find((p) => p.id === profileId)?.name ?? 'profile'}`}
         </div>
       )}
 
