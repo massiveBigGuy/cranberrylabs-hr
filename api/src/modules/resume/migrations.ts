@@ -37,4 +37,13 @@ export const migrations: Migration[] = [
       db.exec(`ALTER TABLE writing_samples ADD COLUMN user_id TEXT NOT NULL DEFAULT '';`);
     },
   },
+  {
+    id: 'resume_004_profile_id',
+    up: (db) => {
+      // FK to profiles(id). profiles' init backfills this to each user's default profile.
+      db.exec(
+        `ALTER TABLE writing_samples ADD COLUMN profile_id INTEGER REFERENCES profiles(id);`,
+      );
+    },
+  },
 ];

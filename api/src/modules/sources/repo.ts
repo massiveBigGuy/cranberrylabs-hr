@@ -14,6 +14,7 @@ export interface SourceRow {
   last_scraped_at: string | null;
   last_status: SourceStatus;
   last_error: string | null;
+  profile_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -23,12 +24,14 @@ export interface NewSourceInput {
   platform: Platform;
   tenant_url: string;
   search_params?: object | null;
+  profile_id?: number | null;
 }
 
 export interface SourceUpdate {
   company_name?: string;
   enabled?: boolean;
   search_params?: object | null;
+  profile_id?: number | null;
 }
 
 export interface ProbeResultUpdate {
@@ -63,8 +66,8 @@ export class SourcesRepo {
 
   insert(input: NewSourceInput, userId: string): SourceRow {
     const stmt = this.db.prepare(`
-      INSERT INTO sources (company_name, platform, tenant_url, search_params, user_id)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO sources (company_name, platform, tenant_url, search_params, user_id, profile_id)
+      VALUES (?, ?, ?, ?, ?, ?)
       RETURNING *
     `);
     return stmt.get(
@@ -73,6 +76,7 @@ export class SourcesRepo {
       input.tenant_url,
       input.search_params == null ? null : JSON.stringify(input.search_params),
       userId,
+      input.profile_id ?? null,
     ) as SourceRow;
   }
 
@@ -90,6 +94,10 @@ export class SourcesRepo {
     if (patch.search_params !== undefined) {
       fields.push('search_params = ?');
       values.push(patch.search_params == null ? null : JSON.stringify(patch.search_params));
+    }
+    if (patch.profile_id !== undefined) {
+      fields.push('profile_id = ?');
+      values.push(patch.profile_id ?? null);
     }
     if (fields.length === 0) return this.get(id);
     fields.push("updated_at = datetime('now')");

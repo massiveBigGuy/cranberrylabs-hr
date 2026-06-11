@@ -24,6 +24,7 @@ export interface WritingSampleRow {
   kind: string;
   content: string;
   active: number;  // 0 | 1
+  profile_id: number | null;
   created_at: string;
 }
 
@@ -87,18 +88,31 @@ export class ResumeRepo {
 
   // --- Writing samples ---
 
-  listWritingSamples(userId: string): WritingSampleRow[] {
+  listWritingSamples(userId: string, profileId?: number): WritingSampleRow[] {
+    if (profileId !== undefined) {
+      return this.db
+        .prepare(
+          'SELECT * FROM writing_samples WHERE user_id = ? AND profile_id = ? ORDER BY created_at DESC',
+        )
+        .all(userId, profileId) as WritingSampleRow[];
+    }
     return this.db
       .prepare('SELECT * FROM writing_samples WHERE user_id = ? ORDER BY created_at DESC')
       .all(userId) as WritingSampleRow[];
   }
 
-  createWritingSample(label: string, kind: string, content: string, userId: string): WritingSampleRow {
+  createWritingSample(
+    label: string,
+    kind: string,
+    content: string,
+    userId: string,
+    profileId?: number | null,
+  ): WritingSampleRow {
     return this.db
       .prepare(
-        'INSERT INTO writing_samples (user_id, label, kind, content) VALUES (?, ?, ?, ?) RETURNING *',
+        'INSERT INTO writing_samples (user_id, label, kind, content, profile_id) VALUES (?, ?, ?, ?, ?) RETURNING *',
       )
-      .get(userId, label, kind, content) as WritingSampleRow;
+      .get(userId, label, kind, content, profileId ?? null) as WritingSampleRow;
   }
 
   updateWritingSample(

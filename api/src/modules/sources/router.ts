@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import type { Queue } from 'bullmq';
 import type { AppContext } from '../types';
 import { SourcesRepo, type Platform } from './repo';
+import { ProfilesRepo } from '../profiles/repo';
 import { parseWorkdayUrl } from '../scraper/url-parser';
 import type { ScrapeJobData } from '../scraper/worker';
 import { ScrapeRunsRepo } from '../scraper/repo-runs';
@@ -12,6 +13,7 @@ export function buildSourcesRouter(
 ): Router {
   const router = Router();
   const sources = new SourcesRepo(ctx.db);
+  const profilesRepo = new ProfilesRepo(ctx.db);
   const runs = new ScrapeRunsRepo(ctx.db);
 
   router.get('/', (req, res) => {
@@ -21,7 +23,7 @@ export function buildSourcesRouter(
   router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = req.user!.username;
-      const { company_name, platform, tenant_url, search_params } = req.body ?? {};
+      const { company_name, platform, tenant_url, search_params, profile_id } = req.body ?? {};
       const v = validateNewSource({ company_name, platform, tenant_url });
       if (!v.ok) {
         res.status(400).json({ error: v.error });
@@ -32,12 +34,23 @@ export function buildSourcesRouter(
         return;
       }
 
+      // profile_id defaults to the user's default profile when omitted so
+      // existing source-creation clients keep working without change.
+      let resolvedProfileId: number | null = null;
+      if (typeof profile_id === 'number') {
+        resolvedProfileId = profile_id;
+      } else {
+        const defaultProfile = profilesRepo.getDefault(userId);
+        resolvedProfileId = defaultProfile?.id ?? null;
+      }
+
       const row = sources.insert(
         {
           company_name: v.company_name,
           platform: v.platform,
           tenant_url: v.tenant_url,
           search_params: search_params ?? null,
+          profile_id: resolvedProfileId,
         },
         userId,
       );
@@ -75,11 +88,14 @@ export function buildSourcesRouter(
       res.status(404).json({ error: 'not found' });
       return;
     }
-    const { company_name, enabled, search_params } = req.body ?? {};
+    const { company_name, enabled, search_params, profile_id } = req.body ?? {};
     const updated = sources.update(id, {
       ...(company_name !== undefined && { company_name }),
       ...(enabled !== undefined && { enabled: !!enabled }),
       ...(search_params !== undefined && { search_params }),
+      ...(profile_id !== undefined && {
+        profile_id: typeof profile_id === 'number' ? profile_id : null,
+      }),
     });
     res.json({ source: updated });
   });

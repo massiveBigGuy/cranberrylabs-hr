@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { AppContext } from '../types';
+import type { DB } from '../../services/db';
 import { JobsRepo, isJobStatus, type JobStatus, type ListJobsOptions } from './repo';
 import { TagsRepo } from './repo-tags';
 import { computeFitScore } from './fit-scorer';
@@ -37,9 +38,22 @@ export function buildJobsRouter(ctx: AppContext): Router {
   router.get('/', (req, res) => {
     const userId = req.user!.username;
     const applyKeywordFilter = req.query.filter !== 'off';
+    const profileId = parseNumberOpt(req.query.profile_id);
 
     const rawSort = req.query.sort;
     const sortBy: 'fit' | 'date' = rawSort === 'date' ? 'date' : 'fit';
+
+    // Resolve keyword filter from the requested profile (if specified) or the
+    // user's default profile. Falls back to scraper.filters config when no
+    // profiles exist yet (e.g. fresh deploy before first boot with 7.2).
+    let keywordFilter: { include?: string[]; exclude?: string[] } | undefined;
+    if (applyKeywordFilter) {
+      const profileKws = resolveProfileKeywords(ctx.db, userId, profileId);
+      keywordFilter = profileKws ?? {
+        include: ctx.config.scraper?.filters?.target_keywords ?? [],
+        exclude: ctx.config.scraper?.filters?.excluded_keywords ?? [],
+      };
+    }
 
     const opts: ListJobsOptions = {
       userId,
@@ -48,17 +62,13 @@ export function buildJobsRouter(ctx: AppContext): Router {
       minFit: parseNumberOpt(req.query.min_fit),
       tagIds: parseTagIds(req.query.tag),
       sourceId: parseNumberOpt(req.query.source_id),
+      profileId,
       search: typeof req.query.search === 'string' ? req.query.search : undefined,
       limit: parseNumberOpt(req.query.limit),
       offset: parseNumberOpt(req.query.offset),
       sortBy,
       applyKeywordFilter,
-      keywordFilter: applyKeywordFilter
-        ? {
-            include: ctx.config.scraper?.filters?.target_keywords ?? [],
-            exclude: ctx.config.scraper?.filters?.excluded_keywords ?? [],
-          }
-        : undefined,
+      keywordFilter,
     };
 
     if (!opts.statuses && req.query.status !== 'all') {
@@ -74,10 +84,12 @@ export function buildJobsRouter(ctx: AppContext): Router {
   // GET /api/jobs/stats — must register before /:id
   router.get('/stats', (req, res) => {
     const userId = req.user!.username;
-    const keywordFilter = {
-      include: ctx.config.scraper?.filters?.target_keywords ?? [],
-      exclude: ctx.config.scraper?.filters?.excluded_keywords ?? [],
-    };
+    // Use default profile keywords; fall back to config when no profiles exist.
+    const keywordFilter =
+      resolveProfileKeywords(ctx.db, userId, undefined) ?? {
+        include: ctx.config.scraper?.filters?.target_keywords ?? [],
+        exclude: ctx.config.scraper?.filters?.excluded_keywords ?? [],
+      };
     const stats = jobs.stats(userId, keywordFilter);
     res.json(stats);
   });
@@ -95,7 +107,16 @@ export function buildJobsRouter(ctx: AppContext): Router {
       return;
     }
     const jobTags = jobs.tagsFor(id);
-    res.json({ job, tags: jobTags });
+    // Derived profile: resolved via source_id → sources.profile_id → profiles
+    const profile =
+      (ctx.db
+        .prepare(
+          `SELECT p.* FROM profiles p
+           JOIN sources s ON s.profile_id = p.id
+           WHERE s.id = ?`,
+        )
+        .get(job.source_id) as Record<string, unknown> | undefined) ?? null;
+    res.json({ job, tags: jobTags, profile });
   });
 
   // PATCH /api/jobs/:id
@@ -231,8 +252,12 @@ export function buildJobsRouter(ctx: AppContext): Router {
       res.status(400).json({ error: 'job has no description yet' });
       return;
     }
-    const signals = ctx.config.scraper?.filters?.target_keywords ?? [];
-    const excludes = ctx.config.scraper?.filters?.excluded_keywords ?? [];
+    // Use the job's derived profile keywords; fall back to config.
+    const profileKws = resolveJobProfileKeywords(ctx.db, id);
+    const signals =
+      profileKws?.include ?? ctx.config.scraper?.filters?.target_keywords ?? [];
+    const excludes =
+      profileKws?.exclude ?? ctx.config.scraper?.filters?.excluded_keywords ?? [];
     const result = computeFitScore(job, signals, excludes);
     jobs.updateFitScore(id, result.score, JSON.stringify(result.reasons));
     const updated = jobs.get(id);
@@ -240,4 +265,63 @@ export function buildJobsRouter(ctx: AppContext): Router {
   });
 
   return router;
+}
+
+// --- profile keyword helpers -----------------------------------------------
+
+type KeywordFilter = { include: string[]; exclude: string[] };
+type ProfileKwRow = { target_keywords: string | null; excluded_keywords: string | null };
+
+/**
+ * Returns keyword filter from the given profile (or the user's default profile
+ * when profileId is omitted). Returns undefined if no profile exists yet.
+ */
+function resolveProfileKeywords(
+  db: DB,
+  userId: string,
+  profileId: number | undefined,
+): KeywordFilter | undefined {
+  const row = (
+    profileId !== undefined
+      ? db
+          .prepare(
+            'SELECT target_keywords, excluded_keywords FROM profiles WHERE id = ? AND user_id = ?',
+          )
+          .get(profileId, userId)
+      : db
+          .prepare(
+            'SELECT target_keywords, excluded_keywords FROM profiles WHERE user_id = ? AND is_default = 1',
+          )
+          .get(userId)
+  ) as ProfileKwRow | undefined;
+
+  if (!row) return undefined;
+  return {
+    include: row.target_keywords ? (JSON.parse(row.target_keywords) as string[]) : [],
+    exclude: row.excluded_keywords ? (JSON.parse(row.excluded_keywords) as string[]) : [],
+  };
+}
+
+/**
+ * Returns keyword filter from a specific job's derived profile
+ * (job → source → profile). Returns undefined if no profile is attached.
+ */
+function resolveJobProfileKeywords(
+  db: DB,
+  jobId: number,
+): KeywordFilter | undefined {
+  const row = db
+    .prepare(
+      `SELECT p.target_keywords, p.excluded_keywords FROM profiles p
+       JOIN sources s ON s.profile_id = p.id
+       JOIN jobs j ON j.source_id = s.id
+       WHERE j.id = ?`,
+    )
+    .get(jobId) as ProfileKwRow | undefined;
+
+  if (!row) return undefined;
+  return {
+    include: row.target_keywords ? (JSON.parse(row.target_keywords) as string[]) : [],
+    exclude: row.excluded_keywords ? (JSON.parse(row.excluded_keywords) as string[]) : [],
+  };
 }

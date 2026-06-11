@@ -35,4 +35,13 @@ export const migrations: Migration[] = [
       db.exec(`ALTER TABLE sources ADD COLUMN user_id TEXT NOT NULL DEFAULT '';`);
     },
   },
+  {
+    id: 'sources_003_profile_id',
+    up: (db) => {
+      // FK to profiles(id). SQLite validates FK constraints at DML time, not
+      // DDL time — the column can be added before profiles_001_init runs.
+      // profiles' init backfills this column to each user's default profile.
+      db.exec(`ALTER TABLE sources ADD COLUMN profile_id INTEGER REFERENCES profiles(id);`);
+    },
+  },
 ];

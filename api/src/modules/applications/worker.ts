@@ -43,14 +43,28 @@ export function buildGenerationWorker(
       const appRow = apps.get(applicationId);
       if (!appRow) throw new Error(`Application ${applicationId} not found`);
 
-      // Use the pinned resume version from when the application was created so a
-      // resume update between enqueue and processing doesn't silently change output.
-      const resumeRow = appRow.resume_version_id
-        ? resume.getById(appRow.resume_version_id)
+      // Resolve the job's profile (via source_id → sources.profile_id → profiles).
+      const profileRow = ctx.db
+        .prepare(
+          `SELECT p.id, p.resume_version_id FROM profiles p
+           JOIN sources s ON s.profile_id = p.id
+           JOIN jobs j ON j.source_id = s.id
+           WHERE j.id = ?`,
+        )
+        .get(jobId) as { id: number; resume_version_id: number | null } | undefined;
+
+      // Resume priority: pinned at enqueue (backward compat) → profile version → global active.
+      const resumeVersionId =
+        appRow.resume_version_id ?? profileRow?.resume_version_id ?? null;
+      const resumeRow = resumeVersionId
+        ? resume.getById(resumeVersionId)
         : resume.getActive(userId);
       if (!resumeRow) throw new Error('Master resume not found');
 
-      const samples = resume.listWritingSamples(userId);
+      // Writing samples: scoped to profile when available, else all for the user.
+      const samples = profileRow
+        ? resume.listWritingSamples(userId, profileRow.id)
+        : resume.listWritingSamples(userId);
 
       const output = await generateApplication(
         applicationId,

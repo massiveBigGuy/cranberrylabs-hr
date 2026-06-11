@@ -50,14 +50,26 @@ export function buildResumeRouter(ctx: AppContext): Router {
     res.json({ resume });
   });
 
-  // GET /api/resume/writing-samples
+  // GET /api/resume/writing-samples — optional ?profile_id= filter
   router.get('/writing-samples', (req, res) => {
-    res.json({ samples: repo.listWritingSamples(req.user!.username) });
+    const rawProfileId = req.query.profile_id;
+    const profileId =
+      rawProfileId !== undefined ? Number(rawProfileId) : undefined;
+    const validProfileId =
+      profileId !== undefined && Number.isInteger(profileId) && profileId > 0
+        ? profileId
+        : undefined;
+    res.json({ samples: repo.listWritingSamples(req.user!.username, validProfileId) });
   });
 
-  // POST /api/resume/writing-samples
+  // POST /api/resume/writing-samples — optional profile_id
   router.post('/writing-samples', (req, res) => {
-    const body = (req.body ?? {}) as { label?: unknown; kind?: unknown; content?: unknown };
+    const body = (req.body ?? {}) as {
+      label?: unknown;
+      kind?: unknown;
+      content?: unknown;
+      profile_id?: unknown;
+    };
     if (typeof body.label !== 'string' || !body.label.trim()) {
       res.status(400).json({ error: 'label required' });
       return;
@@ -70,11 +82,13 @@ export function buildResumeRouter(ctx: AppContext): Router {
       res.status(400).json({ error: 'content required' });
       return;
     }
+    const profileId = typeof body.profile_id === 'number' ? body.profile_id : null;
     const sample = repo.createWritingSample(
       body.label.trim(),
       body.kind,
       body.content,
       req.user!.username,
+      profileId,
     );
     res.status(201).json({ sample });
   });

@@ -57,6 +57,7 @@ export interface ListJobsOptions {
   minFit?: number;
   tagIds?: number[];
   sourceId?: number;
+  profileId?: number;         // filter to jobs whose source belongs to this profile
   search?: string;
   limit?: number;
   offset?: number;
@@ -125,6 +126,11 @@ export class JobsRepo {
     if (typeof opts.sourceId === 'number') {
       where.push('source_id = :source_id');
       params.source_id = opts.sourceId;
+    }
+
+    if (typeof opts.profileId === 'number') {
+      where.push('source_id IN (SELECT id FROM sources WHERE profile_id = :profile_id)');
+      params.profile_id = opts.profileId;
     }
 
     if (opts.search && opts.search.trim()) {

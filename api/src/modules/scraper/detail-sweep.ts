@@ -75,6 +75,27 @@ export async function runDetailSweep(
       continue;
     }
 
+    // Load the profile's keywords for this source once (shared across all
+    // jobs in this source). Falls back to scraper.filters config when no
+    // profile is attached yet (e.g. before the first 7.2 boot).
+    let profileSignals: string[] = ctx.config.scraper?.filters?.target_keywords ?? [];
+    let profileExcludes: string[] = ctx.config.scraper?.filters?.excluded_keywords ?? [];
+    if (source.profile_id != null) {
+      const profileRow = ctx.db
+        .prepare('SELECT target_keywords, excluded_keywords FROM profiles WHERE id = ?')
+        .get(source.profile_id) as
+        | { target_keywords: string | null; excluded_keywords: string | null }
+        | undefined;
+      if (profileRow) {
+        profileSignals = profileRow.target_keywords
+          ? (JSON.parse(profileRow.target_keywords) as string[])
+          : [];
+        profileExcludes = profileRow.excluded_keywords
+          ? (JSON.parse(profileRow.excluded_keywords) as string[])
+          : [];
+      }
+    }
+
     for (const job of sourceJobs) {
       try {
         const detail = await adapter.fetchDetail(
@@ -93,12 +114,10 @@ export async function runDetailSweep(
           detail.description_hash,
           detail.hiring_manager ?? null,
         );
-        const signals = ctx.config.scraper?.filters?.target_keywords ?? [];
-        const excludes = ctx.config.scraper?.filters?.excluded_keywords ?? [];
         const fit = computeFitScore(
           { title: job.title, description: detail.description },
-          signals,
-          excludes,
+          profileSignals,
+          profileExcludes,
         );
         jobs.updateFitScore(job.id, fit.score, JSON.stringify(fit.reasons));
         bus.publish('job.discovered', {
