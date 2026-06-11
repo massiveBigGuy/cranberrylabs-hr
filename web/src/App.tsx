@@ -43,9 +43,26 @@ export function App() {
             >
               Applications
             </NavLink>
-            <span className="text-muted/40 cursor-not-allowed" title="Future">
+            <NavLink
+              to="/sources"
+              className={({ isActive }) =>
+                `transition-colors ${
+                  isActive ? 'text-ink' : 'text-muted hover:text-ink'
+                }`
+              }
+            >
               Sources
-            </span>
+            </NavLink>
+            <NavLink
+              to="/profiles"
+              className={({ isActive }) =>
+                `transition-colors ${
+                  isActive ? 'text-ink' : 'text-muted hover:text-ink'
+                }`
+              }
+            >
+              Profiles
+            </NavLink>
           </nav>
         </div>
       </header>

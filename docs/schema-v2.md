@@ -39,7 +39,7 @@ Build-order progress:
 - [x] Step 7 — Queue + concurrency
 - [x] Step 7.1 — Multi-user + permissions
 - [x] Step 7.2 — Profiles (per-role-type filter + resume + voice)
-- [ ] Step 7.3 — Manual job entry (synthetic source)
+- [x] Step 7.3 — Manual job entry (synthetic source)
 - [ ] Step 8 — Ollama adapter + model toggle
 - [ ] Step 9 — Notifications
 - [ ] Step 10 — Retention

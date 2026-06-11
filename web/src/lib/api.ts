@@ -138,6 +138,31 @@ export interface JobDetailResponse {
   tags: Tag[];
 }
 
+// ---------- Sources module ----------
+
+export type SourcePlatform = 'workday' | 'greenhouse' | 'lever' | 'icims' | 'custom' | 'manual';
+export type SourceStatus = 'ok' | 'blocked' | 'error' | null;
+
+export interface Source {
+  id: number;
+  user_id: string;
+  company_name: string;
+  platform: SourcePlatform;
+  tenant_url: string;
+  search_params: string | null;
+  enabled: 0 | 1;
+  last_scraped_at: string | null;
+  last_status: SourceStatus;
+  last_error: string | null;
+  profile_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SourcesListResponse {
+  sources: Source[];
+}
+
 // ---------- Profiles module ----------
 
 export interface Profile {

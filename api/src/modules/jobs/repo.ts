@@ -248,6 +248,37 @@ export class JobsRepo {
       .all() as Pick<JobRow, 'id' | 'title' | 'description'>[];
   }
 
+  insertManual(input: {
+    source_id: number;
+    external_id: string;
+    title: string;
+    company: string;
+    url: string;
+    description: string;
+    description_hash: string;
+    location: string | null;
+    remote_type: string | null;
+    posted_date: string | null;
+    fit_score: number | null;
+    fit_reasons: string | null;
+    user_id: string;
+  }): JobRow {
+    return this.db
+      .prepare(
+        `INSERT INTO jobs (
+          source_id, external_id, title, company, url, description, description_hash,
+          location, remote_type, posted_date, fit_score, fit_reasons,
+          detail_fetch_status, user_id
+        ) VALUES (
+          :source_id, :external_id, :title, :company, :url, :description, :description_hash,
+          :location, :remote_type, :posted_date, :fit_score, :fit_reasons,
+          'ok', :user_id
+        )
+        RETURNING *`,
+      )
+      .get(input) as JobRow;
+  }
+
   tagsFor(jobId: number): { id: number; name: string; color: string | null }[] {
     return this.db
       .prepare(

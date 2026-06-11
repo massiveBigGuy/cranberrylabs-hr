@@ -5,6 +5,7 @@ import { api, qs, type JobsListResponse, type ProfilesListResponse } from '../li
 import { JobList } from '../components/JobList';
 import { JobDetailDrawer } from '../components/JobDetailDrawer';
 import { JobStatsPanel } from '../components/JobStatsPanel';
+import { AddJobModal } from '../components/AddJobModal';
 
 export function JobsPage() {
   const qc = useQueryClient();
@@ -17,6 +18,7 @@ export function JobsPage() {
   const [sortBy, setSortBy] = useState<'fit' | 'date'>('fit');
   const [profileId, setProfileId] = useState<number | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<number>>(new Set());
+  const [showAddJob, setShowAddJob] = useState(false);
 
   const profilesQuery = useQuery({
     queryKey: ['profiles'],
@@ -88,6 +90,13 @@ export function JobsPage() {
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-lg font-semibold text-ink mr-auto">Jobs</h1>
+
+        <button
+          onClick={() => setShowAddJob(true)}
+          className="text-xs px-2.5 py-1.5 rounded border border-surface text-muted hover:text-ink hover:border-ink/40 transition-colors"
+        >
+          + Add Job
+        </button>
 
         <input
           type="text"
@@ -180,6 +189,10 @@ export function JobsPage() {
         jobId={selectedId}
         onClose={() => setSelectedId(null)}
       />
+
+      {showAddJob && (
+        <AddJobModal profiles={profiles} onClose={() => setShowAddJob(false)} />
+      )}
     </div>
   );
 }

@@ -1,9 +1,12 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import type { AppContext } from '../types';
 import type { DB } from '../../services/db';
 import { JobsRepo, isJobStatus, type JobStatus, type ListJobsOptions } from './repo';
 import { TagsRepo } from './repo-tags';
 import { computeFitScore } from './fit-scorer';
+import { requireRole } from '../../middleware/requireRole';
+import { bus } from '../../services/sse/bus';
 
 export function buildJobsRouter(ctx: AppContext): Router {
   const router = Router();
@@ -92,6 +95,123 @@ export function buildJobsRouter(ctx: AppContext): Router {
       };
     const stats = jobs.stats(userId, keywordFilter);
     res.json(stats);
+  });
+
+  // POST /api/jobs/manual — create a job by hand
+  // Must register before /:id so the literal "manual" isn't eaten by the wildcard.
+  router.post('/manual', requireRole('user'), (req, res) => {
+    const userId = req.user!.username;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    const company = typeof body.company === 'string' ? body.company.trim() : '';
+    const description = typeof body.description === 'string' ? body.description.trim() : '';
+    if (!title || !company || !description) {
+      res.status(400).json({ error: 'title, company, and description are required' });
+      return;
+    }
+
+    const url =
+      typeof body.url === 'string' && body.url.trim() ? body.url.trim() : null;
+    const location =
+      typeof body.location === 'string' && body.location.trim()
+        ? body.location.trim()
+        : null;
+    const remoteType =
+      typeof body.remote_type === 'string' && body.remote_type.trim()
+        ? body.remote_type.trim()
+        : null;
+    const postedDate =
+      typeof body.posted_date === 'string' && body.posted_date.trim()
+        ? body.posted_date.trim()
+        : null;
+    const profileIdReq =
+      typeof body.profile_id === 'number' ? body.profile_id : null;
+
+    // Get or lazily create the per-user synthetic manual source.
+    const manualTenantUrl = `manual://${userId}`;
+    type SourceRef = { id: number; profile_id: number | null };
+    let manualSource = ctx.db
+      .prepare('SELECT id, profile_id FROM sources WHERE tenant_url = ? AND user_id = ?')
+      .get(manualTenantUrl, userId) as SourceRef | undefined;
+
+    if (!manualSource) {
+      const defaultProfileId =
+        (
+          ctx.db
+            .prepare('SELECT id FROM profiles WHERE user_id = ? AND is_default = 1')
+            .get(userId) as { id: number } | undefined
+        )?.id ?? null;
+
+      manualSource = ctx.db
+        .prepare(
+          `INSERT INTO sources (company_name, platform, tenant_url, user_id, profile_id, enabled)
+           VALUES ('Manual entries', 'manual', ?, ?, ?, 0)
+           RETURNING id, profile_id`,
+        )
+        .get(manualTenantUrl, userId, defaultProfileId) as SourceRef;
+    }
+
+    // Re-point the manual source at a specific profile when the caller provides one.
+    if (profileIdReq !== null && profileIdReq !== manualSource.profile_id) {
+      const owned = ctx.db
+        .prepare('SELECT 1 FROM profiles WHERE id = ? AND user_id = ?')
+        .get(profileIdReq, userId);
+      if (owned) {
+        ctx.db
+          .prepare("UPDATE sources SET profile_id = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(profileIdReq, manualSource.id);
+        manualSource = { ...manualSource, profile_id: profileIdReq };
+      }
+    }
+
+    // Resolve fit-scoring keywords from the manual source's profile.
+    let signals: string[] = ctx.config.scraper?.filters?.target_keywords ?? [];
+    let excludes: string[] = ctx.config.scraper?.filters?.excluded_keywords ?? [];
+    if (manualSource.profile_id != null) {
+      const profileRow = ctx.db
+        .prepare('SELECT target_keywords, excluded_keywords FROM profiles WHERE id = ?')
+        .get(manualSource.profile_id) as
+        | { target_keywords: string | null; excluded_keywords: string | null }
+        | undefined;
+      if (profileRow) {
+        signals = profileRow.target_keywords
+          ? (JSON.parse(profileRow.target_keywords) as string[])
+          : [];
+        excludes = profileRow.excluded_keywords
+          ? (JSON.parse(profileRow.excluded_keywords) as string[])
+          : [];
+      }
+    }
+
+    const fit = computeFitScore({ title, description }, signals, excludes);
+    const externalId = randomUUID();
+    const descriptionHash = createHash('sha256').update(description).digest('hex');
+
+    const job = jobs.insertManual({
+      source_id: manualSource.id,
+      external_id: externalId,
+      title,
+      company,
+      url: url ?? `manual://${externalId}`,
+      description,
+      description_hash: descriptionHash,
+      location,
+      remote_type: remoteType,
+      posted_date: postedDate,
+      fit_score: fit.score,
+      fit_reasons: JSON.stringify(fit.reasons),
+      user_id: userId,
+    });
+
+    bus.publish('job.discovered', {
+      phase: 'manual',
+      job_id: job.id,
+      source_id: manualSource.id,
+      title,
+    });
+
+    res.status(201).json({ job });
   });
 
   // GET /api/jobs/:id
