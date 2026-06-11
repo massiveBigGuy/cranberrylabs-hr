@@ -10,7 +10,7 @@ export function buildProfilesRouter(ctx: AppContext): Router {
   const profiles = new ProfilesRepo(ctx.db);
   const jobs = new JobsRepo(ctx.db);
 
-  function parseId(raw: string): number | null {
+  function parseId(raw: string | string[] | undefined): number | null {
     const n = Number(raw);
     return Number.isInteger(n) && n > 0 ? n : null;
   }
