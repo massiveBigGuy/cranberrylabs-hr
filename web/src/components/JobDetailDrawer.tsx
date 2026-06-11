@@ -88,8 +88,11 @@ export function JobDetailDrawer({ jobId, onClose }: JobDetailDrawerProps) {
   const existingApp = appData?.applications[0] ?? null;
 
   const generate = useMutation({
-    mutationFn: () =>
-      api.post<{ application: ApplicationWithJob }>('/api/applications', { job_id: jobId }),
+    mutationFn: (adapterName: 'anthropic' | 'ollama') =>
+      api.post<{ application: ApplicationWithJob }>('/api/applications', {
+        job_id: jobId,
+        adapter: adapterName,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['applications'] });
       qc.invalidateQueries({ queryKey: ['jobs'] });
@@ -181,7 +184,7 @@ export function JobDetailDrawer({ jobId, onClose }: JobDetailDrawerProps) {
                 existing={existingApp}
                 isPending={generate.isPending}
                 error={generate.error as Error | null}
-                onGenerate={() => generate.mutate()}
+                onGenerate={(adapter) => generate.mutate(adapter)}
               />
             </div>
 
@@ -300,8 +303,10 @@ function GenerateControl({
   existing: ApplicationWithJob | null;
   isPending: boolean;
   error: Error | null;
-  onGenerate: () => void;
+  onGenerate: (adapter: 'anthropic' | 'ollama') => void;
 }) {
+  const [adapter, setAdapter] = useState<'anthropic' | 'ollama'>('anthropic');
+
   if (existing) {
     return (
       <a
@@ -315,13 +320,24 @@ function GenerateControl({
 
   return (
     <div className="flex flex-col gap-1">
-      <button
-        onClick={onGenerate}
-        disabled={isPending}
-        className="text-sm px-3 py-1.5 rounded border border-accent bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {isPending ? 'Queuing…' : 'Generate Application'}
-      </button>
+      <div className="flex gap-2 items-center">
+        <select
+          value={adapter}
+          onChange={(e) => setAdapter(e.target.value as 'anthropic' | 'ollama')}
+          disabled={isPending}
+          className="text-xs px-2 py-1.5 rounded bg-surface border border-surface text-muted disabled:opacity-50"
+        >
+          <option value="anthropic">Claude (Anthropic)</option>
+          <option value="ollama">Ollama (local)</option>
+        </select>
+        <button
+          onClick={() => onGenerate(adapter)}
+          disabled={isPending}
+          className="text-sm px-3 py-1.5 rounded border border-accent bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isPending ? 'Queuing…' : 'Generate Application'}
+        </button>
+      </div>
       {error && (
         <p className="text-xs text-red-400 max-w-xs truncate" title={error.message}>
           {error.message}

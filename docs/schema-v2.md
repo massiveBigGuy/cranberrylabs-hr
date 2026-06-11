@@ -40,7 +40,7 @@ Build-order progress:
 - [x] Step 7.1 — Multi-user + permissions
 - [x] Step 7.2 — Profiles (per-role-type filter + resume + voice)
 - [x] Step 7.3 — Manual job entry (synthetic source)
-- [ ] Step 8 — Ollama adapter + model toggle
+- [x] Step 8 — Ollama adapter + model toggle
 - [ ] Step 9 — Notifications
 - [ ] Step 10 — Retention
 - [ ] Step 11 — Polish (scrape_runs admin view, regenerate-with-feedback, etc.)
@@ -971,7 +971,7 @@ Annotated with current status:
     add a job by hand. Keeps `job → source → profile` universal so the
     stopgap profile can be populated where no ATS adapter exists. See
     §18.
-12. [ ] **Step 8 — Ollama adapter + model toggle.** UI switch on the
+12. [x] **Step 8 — Ollama adapter + model toggle.** UI switch on the
     enqueue dialog. Orthogonal to profiles (model is not a profile attr).
 13. [ ] **Step 9 — Notifications module.** Browser push + webhook
     channel. Fires on `queue.drained`.

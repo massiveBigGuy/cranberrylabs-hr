@@ -53,6 +53,10 @@ export function buildApplicationsRouter(
       return;
     }
 
+    const rawAdapter = req.body?.adapter;
+    const adapterName: 'anthropic' | 'ollama' | undefined =
+      rawAdapter === 'anthropic' || rawAdapter === 'ollama' ? rawAdapter : undefined;
+
     const activeResume = resume.getActive(userId);
     if (!activeResume) {
       res.status(400).json({
@@ -85,12 +89,13 @@ export function buildApplicationsRouter(
       applicationId: app.id,
       jobId,
       userId,
+      adapterName,
     });
     ctx.db
       .prepare('UPDATE applications SET queue_job_id = ? WHERE id = ?')
       .run(bullJob.id ?? null, app.id);
 
-    apps.addEvent(app.id, 'generation.queued', { adapter: adapter.name });
+    apps.addEvent(app.id, 'generation.queued', { adapter: adapterName ?? adapter.name });
     bus.publish('application.queued', { applicationId: app.id, jobId });
 
     ctx.logger.info('applications: queued for generation', {

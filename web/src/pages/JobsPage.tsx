@@ -18,6 +18,7 @@ export function JobsPage() {
   const [sortBy, setSortBy] = useState<'fit' | 'date'>('fit');
   const [profileId, setProfileId] = useState<number | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<number>>(new Set());
+  const [bulkAdapter, setBulkAdapter] = useState<'anthropic' | 'ollama'>('anthropic');
   const [showAddJob, setShowAddJob] = useState(false);
 
   const profilesQuery = useQuery({
@@ -73,9 +74,9 @@ export function JobsPage() {
   // Fire one POST per selected job; ignore 409s (application already exists).
   // Promise.allSettled so a single failure doesn't block the others.
   const bulkGenerate = useMutation({
-    mutationFn: async (ids: number[]) => {
+    mutationFn: async ({ ids, adapter }: { ids: number[]; adapter: 'anthropic' | 'ollama' }) => {
       await Promise.allSettled(
-        ids.map((id) => api.post('/api/applications', { job_id: id })),
+        ids.map((id) => api.post('/api/applications', { job_id: id, adapter })),
       );
     },
     onSuccess: () => {
@@ -145,8 +146,17 @@ export function JobsPage() {
           <span className="text-muted">
             {selectedJobIds.size} {selectedJobIds.size === 1 ? 'job' : 'jobs'} selected
           </span>
+          <select
+            value={bulkAdapter}
+            onChange={(e) => setBulkAdapter(e.target.value as 'anthropic' | 'ollama')}
+            disabled={bulkGenerate.isPending}
+            className="text-xs px-2 py-1 rounded bg-surface border border-surface text-muted disabled:opacity-50"
+          >
+            <option value="anthropic">Claude</option>
+            <option value="ollama">Ollama</option>
+          </select>
           <button
-            onClick={() => bulkGenerate.mutate([...selectedJobIds])}
+            onClick={() => bulkGenerate.mutate({ ids: [...selectedJobIds], adapter: bulkAdapter })}
             disabled={bulkGenerate.isPending}
             className="px-3 py-1 rounded border border-accent bg-accent/10 text-accent hover:bg-accent/20 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed"
           >

@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { Job, Worker } from 'bullmq';
 import type { AppContext } from '../types';
 import type { LLMAdapter } from '../../services/llm';
+import { buildLLMAdapter } from '../../services/llm';
 import { makeWorker } from '../../services/queue';
 import { ApplicationsRepo } from './repo';
 import { ResumeRepo } from '../resume/repo';
@@ -14,6 +15,7 @@ export interface GenerationJobData {
   applicationId: number;
   jobId: number;
   userId: string;
+  adapterName?: 'anthropic' | 'ollama';
 }
 
 export function buildGenerationWorker(
@@ -27,7 +29,13 @@ export function buildGenerationWorker(
   const worker = makeWorker<GenerationJobData, void>(
     GENERATION_QUEUE_NAME,
     async (job: Job<GenerationJobData>) => {
-      const { applicationId, jobId, userId } = job.data;
+      const { applicationId, jobId, userId, adapterName } = job.data;
+
+      // Per-job adapter: build a fresh one if the enqueue specified a name,
+      // otherwise fall back to the module-level default.
+      const jobAdapter = adapterName
+        ? buildLLMAdapter({ ...ctx.config, llm: { ...ctx.config.llm, default_adapter: adapterName } })
+        : adapter;
 
       apps.updateStatus(applicationId, 'generating');
       bus.publish('application.started', { applicationId, jobId });
@@ -71,7 +79,7 @@ export function buildGenerationWorker(
         jobRow,
         resumeRow,
         samples,
-        adapter,
+        jobAdapter,
         storageRoot,
       );
 

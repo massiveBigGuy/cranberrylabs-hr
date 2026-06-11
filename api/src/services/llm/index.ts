@@ -1,5 +1,6 @@
 import type { AppConfig } from '../../config';
 import { AnthropicAdapter } from './anthropic';
+import { OllamaAdapter } from './ollama';
 
 export type { LLMAdapter, GenerationRequest, GenerationResult } from './types';
 
@@ -9,7 +10,7 @@ export function buildLLMAdapter(config: AppConfig) {
     case 'anthropic':
       return new AnthropicAdapter(config.llm.anthropic);
     case 'ollama':
-      throw new Error('Ollama adapter is not yet implemented (planned for step 8)');
+      return new OllamaAdapter(config.llm.ollama);
     default:
       throw new Error(`Unknown LLM adapter: ${name}`);
   }
