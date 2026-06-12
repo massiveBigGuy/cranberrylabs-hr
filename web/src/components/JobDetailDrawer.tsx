@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, type Job, type JobDetailResponse, type Tag, type ApplicationWithJob } from '../lib/api';
+import { GenerateModal } from './GenerateModal';
 
 interface JobDetailDrawerProps {
   jobId: number | null;
@@ -88,10 +89,11 @@ export function JobDetailDrawer({ jobId, onClose }: JobDetailDrawerProps) {
   const existingApp = appData?.applications[0] ?? null;
 
   const generate = useMutation({
-    mutationFn: (adapterName: 'anthropic' | 'ollama') =>
+    mutationFn: ({ adapterName, systemPrompt }: { adapterName: 'anthropic' | 'ollama'; systemPrompt?: string }) =>
       api.post<{ application: ApplicationWithJob }>('/api/applications', {
         job_id: jobId,
         adapter: adapterName,
+        ...(systemPrompt ? { system_prompt: systemPrompt } : {}),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['applications'] });
@@ -184,7 +186,7 @@ export function JobDetailDrawer({ jobId, onClose }: JobDetailDrawerProps) {
                 existing={existingApp}
                 isPending={generate.isPending}
                 error={generate.error as Error | null}
-                onGenerate={(adapter) => generate.mutate(adapter)}
+                onGenerate={(adapter, systemPrompt) => generate.mutate({ adapterName: adapter, systemPrompt })}
               />
             </div>
 
@@ -303,9 +305,10 @@ function GenerateControl({
   existing: ApplicationWithJob | null;
   isPending: boolean;
   error: Error | null;
-  onGenerate: (adapter: 'anthropic' | 'ollama') => void;
+  onGenerate: (adapter: 'anthropic' | 'ollama', systemPrompt?: string) => void;
 }) {
   const [adapter, setAdapter] = useState<'anthropic' | 'ollama'>('anthropic');
+  const [showModal, setShowModal] = useState(false);
 
   if (existing) {
     return (
@@ -331,7 +334,7 @@ function GenerateControl({
           <option value="ollama">Ollama (local)</option>
         </select>
         <button
-          onClick={() => onGenerate(adapter)}
+          onClick={() => setShowModal(true)}
           disabled={isPending}
           className="text-sm px-3 py-1.5 rounded border border-accent bg-accent/10 text-accent hover:bg-accent/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
@@ -342,6 +345,17 @@ function GenerateControl({
         <p className="text-xs text-red-400 max-w-xs truncate" title={error.message}>
           {error.message}
         </p>
+      )}
+      {showModal && (
+        <GenerateModal
+          jobCount={1}
+          adapter={adapter}
+          onConfirm={(systemPrompt) => {
+            setShowModal(false);
+            onGenerate(adapter, systemPrompt);
+          }}
+          onCancel={() => setShowModal(false)}
+        />
       )}
     </div>
   );

@@ -249,6 +249,12 @@ export function buildApplicationsRouter(
         ? req.body.feedback.trim()
         : undefined;
 
+    const rawRegeneratePrompt = req.body?.system_prompt;
+    const systemPrompt =
+      typeof rawRegeneratePrompt === 'string' && rawRegeneratePrompt.trim()
+        ? rawRegeneratePrompt.trim()
+        : undefined;
+
     apps.updateStatus(id, 'queued');
     ctx.db
       .prepare(`UPDATE applications SET generation_error = NULL, updated_at = datetime('now') WHERE id = ?`)
@@ -259,6 +265,7 @@ export function buildApplicationsRouter(
       jobId: app.job_id,
       userId: app.user_id,
       feedback,
+      systemPrompt,
     });
     ctx.db
       .prepare('UPDATE applications SET queue_job_id = ? WHERE id = ?')

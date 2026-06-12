@@ -275,8 +275,11 @@ function ApplicationDetailDrawer({
   });
 
   const regenerate = useMutation({
-    mutationFn: (feedback?: string) =>
-      api.post(`/api/applications/${appId}/regenerate`, { feedback }),
+    mutationFn: ({ feedback, systemPrompt }: { feedback?: string; systemPrompt?: string }) =>
+      api.post(`/api/applications/${appId}/regenerate`, {
+        feedback,
+        ...(systemPrompt ? { system_prompt: systemPrompt } : {}),
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['applications'] });
       qc.invalidateQueries({ queryKey: ['applications', appId, 'versions'] });
@@ -414,7 +417,7 @@ function ApplicationDetailDrawer({
                 </div>
                 <RegenerateControl
                   isPending={regenerate.isPending}
-                  onRegenerate={(feedback) => regenerate.mutate(feedback)}
+                  onRegenerate={(feedback, systemPrompt) => regenerate.mutate({ feedback, systemPrompt })}
                   label="Retry Generation"
                 />
               </div>
@@ -457,7 +460,7 @@ function ApplicationDetailDrawer({
                 </div>
                 <RegenerateControl
                   isPending={regenerate.isPending}
-                  onRegenerate={(feedback) => regenerate.mutate(feedback)}
+                  onRegenerate={(feedback, systemPrompt) => regenerate.mutate({ feedback, systemPrompt })}
                   label="Regenerate with Feedback…"
                 />
               </div>
@@ -658,12 +661,44 @@ function RegenerateControl({
   isPending,
   label,
 }: {
-  onRegenerate: (feedback?: string) => void;
+  onRegenerate: (feedback?: string, systemPrompt?: string) => void;
   isPending: boolean;
   label: string;
 }) {
   const [open, setOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [promptExpanded, setPromptExpanded] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null); // null = not loaded yet
+  const [promptEdited, setPromptEdited] = useState(false);
+
+  function handleExpandPrompt() {
+    setPromptExpanded(true);
+    if (systemPrompt === null) {
+      api.get<{ prompt: string }>('/api/applications/prompt').then((r) => {
+        setSystemPrompt(r.prompt);
+      });
+    }
+  }
+
+  function handleSubmit() {
+    onRegenerate(
+      feedback.trim() || undefined,
+      promptEdited && systemPrompt != null ? systemPrompt : undefined,
+    );
+    setOpen(false);
+    setFeedback('');
+    setPromptExpanded(false);
+    setSystemPrompt(null);
+    setPromptEdited(false);
+  }
+
+  function handleCancel() {
+    setOpen(false);
+    setFeedback('');
+    setPromptExpanded(false);
+    setSystemPrompt(null);
+    setPromptEdited(false);
+  }
 
   if (!open) {
     return (
@@ -687,20 +722,46 @@ function RegenerateControl({
         rows={3}
         autoFocus
       />
+      <button
+        onClick={promptExpanded ? () => setPromptExpanded(false) : handleExpandPrompt}
+        className="text-xs text-muted hover:text-ink transition-colors flex items-center gap-1"
+      >
+        Advanced {promptExpanded ? '▲' : '▼'} Edit system prompt
+      </button>
+      {promptExpanded && (
+        <div>
+          {systemPrompt === null ? (
+            <p className="text-xs text-muted">Loading…</p>
+          ) : (
+            <>
+              <textarea
+                value={systemPrompt}
+                onChange={(e) => { setSystemPrompt(e.target.value); setPromptEdited(true); }}
+                rows={8}
+                className="w-full text-xs px-2 py-1.5 rounded bg-surface border border-surface text-ink font-mono resize-y"
+              />
+              {promptEdited && (
+                <button
+                  onClick={() => { setPromptEdited(false); setSystemPrompt(null); handleExpandPrompt(); }}
+                  className="mt-1 text-xs text-muted hover:text-ink transition-colors"
+                >
+                  Reset to default
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
       <div className="flex gap-2">
         <button
-          onClick={() => {
-            onRegenerate(feedback.trim() || undefined);
-            setOpen(false);
-            setFeedback('');
-          }}
+          onClick={handleSubmit}
           disabled={isPending}
           className="text-xs px-3 py-1.5 rounded border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
         >
           {isPending ? 'Queuing…' : 'Regenerate'}
         </button>
         <button
-          onClick={() => { setOpen(false); setFeedback(''); }}
+          onClick={handleCancel}
           className="text-xs px-2 py-1.5 text-muted hover:text-ink"
         >
           Cancel
