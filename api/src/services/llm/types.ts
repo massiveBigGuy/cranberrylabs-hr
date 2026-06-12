@@ -13,6 +13,7 @@ export interface GenerationRequest {
     tailoredResume: Record<string, unknown>;
   };
   accumulatedFeedback?: string[];  // oldest → newest
+  systemPrompt?: string;           // overrides the default SYSTEM_PROMPT when present
 }
 
 export interface GenerationResult {

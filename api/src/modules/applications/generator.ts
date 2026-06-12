@@ -42,6 +42,7 @@ export interface GenerationOptions {
     tailoredResume: Record<string, unknown>;
   };
   accumulatedFeedback?: string[];
+  systemPrompt?: string;
 }
 
 export async function generateApplication(
@@ -74,6 +75,7 @@ export async function generateApplication(
     })),
     previousOutput: options.previousOutput,
     accumulatedFeedback: options.accumulatedFeedback,
+    systemPrompt: options.systemPrompt,
   });
 
   // Versioned path: {appId}/v{n}/ when versionNo supplied, legacy {appId}/ otherwise.

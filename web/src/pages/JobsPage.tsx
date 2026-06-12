@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { api, qs, type JobsListResponse, type ProfilesListResponse } from '../lib/api';
+import { api, qs, type JobsListResponse, type ProfilesListResponse, type SystemPromptResponse } from '../lib/api';
 import { JobList } from '../components/JobList';
 import { JobDetailDrawer } from '../components/JobDetailDrawer';
 import { JobStatsPanel } from '../components/JobStatsPanel';
@@ -20,6 +20,7 @@ export function JobsPage() {
   const [selectedJobIds, setSelectedJobIds] = useState<Set<number>>(new Set());
   const [bulkAdapter, setBulkAdapter] = useState<'anthropic' | 'ollama'>('anthropic');
   const [showAddJob, setShowAddJob] = useState(false);
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
 
   const profilesQuery = useQuery({
     queryKey: ['profiles'],
@@ -74,9 +75,23 @@ export function JobsPage() {
   // Fire one POST per selected job; ignore 409s (application already exists).
   // Promise.allSettled so a single failure doesn't block the others.
   const bulkGenerate = useMutation({
-    mutationFn: async ({ ids, adapter }: { ids: number[]; adapter: 'anthropic' | 'ollama' }) => {
+    mutationFn: async ({
+      ids,
+      adapter,
+      systemPrompt,
+    }: {
+      ids: number[];
+      adapter: 'anthropic' | 'ollama';
+      systemPrompt?: string;
+    }) => {
       await Promise.allSettled(
-        ids.map((id) => api.post('/api/applications', { job_id: id, adapter })),
+        ids.map((id) =>
+          api.post('/api/applications', {
+            job_id: id,
+            adapter,
+            ...(systemPrompt ? { system_prompt: systemPrompt } : {}),
+          }),
+        ),
       );
     },
     onSuccess: () => {
@@ -156,7 +171,7 @@ export function JobsPage() {
             <option value="ollama">Ollama</option>
           </select>
           <button
-            onClick={() => bulkGenerate.mutate({ ids: [...selectedJobIds], adapter: bulkAdapter })}
+            onClick={() => setShowGenerateModal(true)}
             disabled={bulkGenerate.isPending}
             className="px-3 py-1 rounded border border-accent bg-accent/10 text-accent hover:bg-accent/20 transition-colors text-xs disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -164,6 +179,18 @@ export function JobsPage() {
               ? 'Queuing…'
               : `Generate ${selectedJobIds.size} Application${selectedJobIds.size === 1 ? '' : 's'}`}
           </button>
+
+          {showGenerateModal && (
+            <GenerateModal
+              jobCount={selectedJobIds.size}
+              adapter={bulkAdapter}
+              onConfirm={(prompt) => {
+                setShowGenerateModal(false);
+                bulkGenerate.mutate({ ids: [...selectedJobIds], adapter: bulkAdapter, systemPrompt: prompt });
+              }}
+              onCancel={() => setShowGenerateModal(false)}
+            />
+          )}
           <button
             onClick={() => setSelectedJobIds(new Set())}
             className="text-xs text-muted hover:text-ink transition-colors"
@@ -203,6 +230,99 @@ export function JobsPage() {
       {showAddJob && (
         <AddJobModal profiles={profiles} onClose={() => setShowAddJob(false)} />
       )}
+    </div>
+  );
+}
+
+function GenerateModal({
+  jobCount,
+  adapter,
+  onConfirm,
+  onCancel,
+}: {
+  jobCount: number;
+  adapter: 'anthropic' | 'ollama';
+  onConfirm: (systemPrompt?: string) => void;
+  onCancel: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [prompt, setPrompt] = useState<string | null>(null); // null = not loaded yet
+  const [edited, setEdited] = useState(false);
+
+  function handleExpand() {
+    setExpanded(true);
+    if (prompt === null) {
+      api.get<SystemPromptResponse>('/api/applications/prompt').then((r) => {
+        setPrompt(r.prompt);
+      });
+    }
+  }
+
+  function handleConfirm() {
+    onConfirm(edited && prompt != null ? prompt : undefined);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-canvas border border-surface rounded-lg shadow-xl w-full max-w-lg mx-4 flex flex-col max-h-[80vh]">
+        <div className="px-5 py-4 border-b border-surface">
+          <h2 className="text-sm font-semibold text-ink">
+            Generate {jobCount} Application{jobCount === 1 ? '' : 's'}
+          </h2>
+          <p className="text-xs text-muted mt-0.5">
+            {adapter === 'anthropic' ? 'Claude (Anthropic)' : 'Ollama (local)'}
+          </p>
+        </div>
+
+        <div className="px-5 py-3 border-b border-surface overflow-y-auto">
+          <button
+            onClick={expanded ? () => setExpanded(false) : handleExpand}
+            className="text-xs text-muted hover:text-ink transition-colors flex items-center gap-1"
+          >
+            Advanced {expanded ? '▲' : '▼'} Edit system prompt
+          </button>
+
+          {expanded && (
+            <div className="mt-3">
+              {prompt === null ? (
+                <p className="text-xs text-muted">Loading…</p>
+              ) : (
+                <>
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => { setPrompt(e.target.value); setEdited(true); }}
+                    rows={12}
+                    className="w-full text-xs px-2 py-1.5 rounded bg-surface border border-surface text-ink font-mono resize-y"
+                  />
+                  {edited && (
+                    <button
+                      onClick={() => { setEdited(false); setPrompt(null); handleExpand(); }}
+                      className="mt-1 text-xs text-muted hover:text-ink transition-colors"
+                    >
+                      Reset to default
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-3 flex justify-end gap-2">
+          <button
+            onClick={onCancel}
+            className="text-xs px-3 py-1.5 rounded border border-surface text-muted hover:text-ink transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            className="text-xs px-3 py-1.5 rounded bg-accent text-canvas hover:bg-accent/80 transition-colors"
+          >
+            Generate
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

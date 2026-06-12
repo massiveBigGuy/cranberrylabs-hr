@@ -43,13 +43,15 @@ ${feedbackBlock}
 
 ${feedbackBlock ? 'Revise the cover letter and tailored resume to address all feedback notes above, keeping unchanged anything not mentioned.' : 'Generate the cover letter and tailored resume now.'}`;
 
+    const system = req.systemPrompt ?? SYSTEM_PROMPT;
+
     const response = await fetch(`${baseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: system },
           { role: 'user', content: userMessage },
         ],
         stream: false,

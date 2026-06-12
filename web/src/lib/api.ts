@@ -308,6 +308,10 @@ export interface ApplicationsListResponse {
   applications: ApplicationWithJob[];
 }
 
+export interface SystemPromptResponse {
+  prompt: string;
+}
+
 export interface ApplicationResponse {
   application: ApplicationWithJob;
 }

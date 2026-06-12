@@ -18,6 +18,7 @@ export interface GenerationJobData {
   userId: string;
   adapterName?: 'anthropic' | 'ollama';
   feedback?: string;
+  systemPrompt?: string;
 }
 
 export function buildGenerationWorker(
@@ -31,7 +32,7 @@ export function buildGenerationWorker(
   const worker = makeWorker<GenerationJobData, void>(
     GENERATION_QUEUE_NAME,
     async (job: Job<GenerationJobData>) => {
-      const { applicationId, jobId, userId, adapterName, feedback } = job.data;
+      const { applicationId, jobId, userId, adapterName, feedback, systemPrompt } = job.data;
 
       // Per-job adapter: build a fresh one if the enqueue specified a name,
       // otherwise fall back to the module-level default.
@@ -127,7 +128,7 @@ export function buildGenerationWorker(
         samples,
         jobAdapter,
         storageRoot,
-        { versionNo: nextVersionNo, previousOutput, accumulatedFeedback },
+        { versionNo: nextVersionNo, previousOutput, accumulatedFeedback, systemPrompt },
       );
 
       apps.updateGenerated(applicationId, {

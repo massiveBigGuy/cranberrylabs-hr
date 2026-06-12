@@ -55,10 +55,12 @@ ${feedbackBlock}
 
 ${feedbackBlock ? 'Revise the cover letter and tailored resume to address all feedback notes above, keeping unchanged anything not mentioned.' : 'Generate the cover letter and tailored resume now.'}`;
 
+    const system = req.systemPrompt ?? SYSTEM_PROMPT;
+
     const message = await client.messages.create({
       model,
       max_tokens: this.config.max_tokens,
-      system: SYSTEM_PROMPT,
+      system,
       messages: [{ role: 'user', content: userMessage }],
     });
 

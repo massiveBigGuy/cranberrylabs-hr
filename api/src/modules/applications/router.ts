@@ -8,6 +8,7 @@ import type { GenerationJobData } from './worker';
 import { ApplicationsRepo, isApplicationStatus } from './repo';
 import { ResumeRepo } from '../resume/repo';
 import { bus } from '../../services/sse/bus';
+import { SYSTEM_PROMPT } from '../../services/llm/utils';
 
 function withinStorageRoot(storageRoot: string, filePath: string): boolean {
   // Ensure a resolved path stays inside the storage root. Defends against
@@ -40,6 +41,13 @@ export function buildApplicationsRouter(
     res.json({ applications: list });
   });
 
+  // GET /api/applications/prompt — returns the default system prompt so the frontend
+  // can pre-populate the edit textarea without hardcoding the text client-side.
+  // Must stay above any /:id route so 'prompt' isn't swallowed by the wildcard.
+  router.get('/prompt', (_req, res) => {
+    res.json({ prompt: SYSTEM_PROMPT });
+  });
+
   // POST /api/applications — enqueue generation for a job (returns 202 immediately)
   router.post('/', async (req, res) => {
     const userId = req.user!.username;
@@ -62,6 +70,12 @@ export function buildApplicationsRouter(
     const rawAdapter = req.body?.adapter;
     const adapterName: 'anthropic' | 'ollama' | undefined =
       rawAdapter === 'anthropic' || rawAdapter === 'ollama' ? rawAdapter : undefined;
+
+    const rawSystemPrompt = req.body?.system_prompt;
+    const systemPrompt =
+      typeof rawSystemPrompt === 'string' && rawSystemPrompt.trim()
+        ? rawSystemPrompt.trim()
+        : undefined;
 
     const activeResume = resume.getActive(userId);
     if (!activeResume) {
@@ -96,6 +110,7 @@ export function buildApplicationsRouter(
       jobId,
       userId,
       adapterName,
+      systemPrompt,
     });
     ctx.db
       .prepare('UPDATE applications SET queue_job_id = ? WHERE id = ?')
