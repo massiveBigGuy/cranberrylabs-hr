@@ -24,7 +24,7 @@ llm:
     model: claude-haiku-4-5-20251001   # versioned ID for production stability
     max_tokens: 4000
   ollama:
-    base_url: http://violet-admin.local:11434
+    base_url: http://violet-admin.cranberrylabs.net:11434
     model: llama3:70b
 
 scraper:
