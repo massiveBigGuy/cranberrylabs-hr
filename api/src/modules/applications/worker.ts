@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import type { Job, Worker } from 'bullmq';
 import type { AppContext } from '../types';
@@ -16,6 +17,7 @@ export interface GenerationJobData {
   jobId: number;
   userId: string;
   adapterName?: 'anthropic' | 'ollama';
+  feedback?: string;
 }
 
 export function buildGenerationWorker(
@@ -29,7 +31,7 @@ export function buildGenerationWorker(
   const worker = makeWorker<GenerationJobData, void>(
     GENERATION_QUEUE_NAME,
     async (job: Job<GenerationJobData>) => {
-      const { applicationId, jobId, userId, adapterName } = job.data;
+      const { applicationId, jobId, userId, adapterName, feedback } = job.data;
 
       // Per-job adapter: build a fresh one if the enqueue specified a name,
       // otherwise fall back to the module-level default.
@@ -74,6 +76,50 @@ export function buildGenerationWorker(
         ? resume.listWritingSamples(userId, profileRow.id)
         : resume.listWritingSamples(userId);
 
+      // --- Version bookkeeping ------------------------------------------------
+      const existingVersions = apps.listVersions(applicationId);
+      const nextVersionNo =
+        existingVersions.length > 0
+          ? Math.max(...existingVersions.map((v) => v.version_no)) + 1
+          : 1;
+
+      // For regeneration: load current version's files as previousOutput and
+      // collect accumulated feedback (all prior feedback notes + this new one).
+      let previousOutput:
+        | { coverLetter: string; tailoredResume: Record<string, unknown> }
+        | undefined;
+      let accumulatedFeedback: string[] | undefined;
+
+      if (existingVersions.length > 0) {
+        const currentVersion = existingVersions.find((v) => v.is_current === 1);
+        if (currentVersion) {
+          try {
+            const coverAbs = currentVersion.cover_letter_path
+              ? path.join(storageRoot, currentVersion.cover_letter_path)
+              : path.join(storageRoot, String(applicationId), 'cover_letter.txt');
+            const resumeAbs = currentVersion.resume_path
+              ? path.join(storageRoot, currentVersion.resume_path)
+              : path.join(storageRoot, String(applicationId), 'resume.json');
+            const coverLetter = fs.readFileSync(coverAbs, 'utf8');
+            const tailoredResume = JSON.parse(
+              fs.readFileSync(resumeAbs, 'utf8'),
+            ) as Record<string, unknown>;
+            previousOutput = { coverLetter, tailoredResume };
+          } catch {
+            // Files pruned or missing — proceed without previousOutput.
+          }
+        }
+
+        const priorFeedback = existingVersions
+          .slice()
+          .sort((a, b) => a.version_no - b.version_no)
+          .map((v) => v.feedback)
+          .filter((f): f is string => f !== null && f.trim() !== '');
+        const allFeedback = feedback ? [...priorFeedback, feedback] : priorFeedback;
+        if (allFeedback.length > 0) accumulatedFeedback = allFeedback;
+      }
+      // -----------------------------------------------------------------------
+
       const output = await generateApplication(
         applicationId,
         jobRow,
@@ -81,6 +127,7 @@ export function buildGenerationWorker(
         samples,
         jobAdapter,
         storageRoot,
+        { versionNo: nextVersionNo, previousOutput, accumulatedFeedback },
       );
 
       apps.updateGenerated(applicationId, {
@@ -91,6 +138,20 @@ export function buildGenerationWorker(
         resumeVersionId: resumeRow.id,
       });
 
+      // Write the version row; mark all prior versions prunable.
+      apps.createVersion({
+        applicationId,
+        versionNo: nextVersionNo,
+        resumePath: output.resumePath,
+        coverPath: output.coverPath,
+        diff: output.diff,
+        modelUsed: output.modelUsed,
+        feedback: feedback ?? null,
+      });
+      if (nextVersionNo > 1) {
+        apps.markPreviousVersionsPrunable(applicationId, nextVersionNo);
+      }
+
       ctx.db
         .prepare(
           `UPDATE jobs SET status = 'ready'
@@ -100,6 +161,7 @@ export function buildGenerationWorker(
 
       apps.addEvent(applicationId, 'generation.completed', {
         model: output.modelUsed,
+        versionNo: nextVersionNo,
         inputTokens: output.inputTokens,
         outputTokens: output.outputTokens,
       });
@@ -108,6 +170,7 @@ export function buildGenerationWorker(
       ctx.logger.info('applications: generation complete', {
         appId: applicationId,
         jobId,
+        versionNo: nextVersionNo,
         model: output.modelUsed,
         inputTokens: output.inputTokens,
         outputTokens: output.outputTokens,

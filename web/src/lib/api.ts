@@ -254,6 +254,27 @@ export interface ApplicationWithJob {
   job_fit_score: number | null;
 }
 
+// ---------- Application versions ----------
+
+export interface ApplicationVersion {
+  id: number;
+  application_id: number;
+  version_no: number;
+  resume_path: string | null;
+  cover_letter_path: string | null;
+  resume_diff: string | null;
+  feedback: string | null;
+  model_used: string | null;
+  generation_notes: string | null;
+  is_current: number;
+  prunable: number;
+  created_at: string;
+}
+
+export interface ApplicationVersionsResponse {
+  versions: ApplicationVersion[];
+}
+
 // ---------- Retention module ----------
 
 export interface RetentionPolicy {
@@ -263,6 +284,23 @@ export interface RetentionPolicy {
   ttl_days: number | null;
   is_default: number;
   created_at: string;
+}
+
+// ---------- Sources — scrape runs ----------
+
+export interface ScrapeRun {
+  id: number;
+  source_id: number;
+  status: 'running' | 'ok' | 'error' | 'blocked';
+  jobs_found: number;
+  jobs_new: number;
+  error_message: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface ScrapeRunsResponse {
+  runs: ScrapeRun[];
 }
 
 export interface ApplicationsListResponse {

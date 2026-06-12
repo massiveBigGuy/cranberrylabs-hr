@@ -45,4 +45,28 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 'applications_002_versions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE application_versions (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          application_id    INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+          version_no        INTEGER NOT NULL,
+          resume_path       TEXT,
+          cover_letter_path TEXT,
+          resume_diff       TEXT,
+          feedback          TEXT,
+          model_used        TEXT,
+          generation_notes  TEXT,
+          is_current        INTEGER NOT NULL DEFAULT 0,
+          prunable          INTEGER NOT NULL DEFAULT 0,
+          created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(application_id, version_no)
+        );
+
+        CREATE INDEX idx_app_versions_app ON application_versions(application_id);
+      `);
+    },
+  },
 ];

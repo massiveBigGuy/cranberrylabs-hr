@@ -43,7 +43,7 @@ Build-order progress:
 - [x] Step 8 — Ollama adapter + model toggle
 - [x] Step 9 — Notifications
 - [x] Step 10 — Retention
-- [ ] Step 11 — Polish (scrape_runs admin view, regenerate-with-feedback, etc.)
+- [x] Step 11 — Polish (scrape runs history, regenerate-with-feedback, version history)
 
 ---
 
@@ -165,7 +165,7 @@ canonical example.
 | `resume` | shipped (step 5) | Master resume + writing samples |
 | `applications` | shipped (step 6) | Generation queue, tailored doc storage, status |
 | `users` | shipped (step 7.1) | User registry, role assignments, permission checks |
-| `profiles` | planned (step 7.2) | Per-role-type bundle: filter keywords + resume version + writing samples |
+| `profiles` | shipped (step 7.2) | Per-role-type bundle: filter keywords + resume version + writing samples |
 | `notifications` | planned (step 9) | Browser push / webhook / email |
 | `retention` | planned (step 10) | TTL policies, pin/unpin, nightly sweep |
 
@@ -960,13 +960,13 @@ Annotated with current status:
    owned tables via migrations, scope all repo queries, wire up the
    `users` table and `requireRole` middleware, and add the `/api/users`
    surface. See §16.
-10. [ ] **Step 7.2 — Profiles.** New `profiles` module + table; add
+10. [x] **Step 7.2 — Profiles.** New `profiles` module + table; add
     `sources.profile_id` and `writing_samples.profile_id`; jobs derive
     their profile through `source_id`. Move fit-scorer keyword source
     and generation resume/sample selection from global config/flags to
     the job's profile. Backfill a per-user default profile from
     `scraper.filters`. See §17.
-11. [ ] **Step 7.3 — Manual job entry.** A synthetic "Manual entry"
+11. [x] **Step 7.3 — Manual job entry.** A synthetic "Manual entry"
     source (per user, attachable to any profile) plus an endpoint to
     add a job by hand. Keeps `job → source → profile` universal so the
     stopgap profile can be populated where no ATS adapter exists. See

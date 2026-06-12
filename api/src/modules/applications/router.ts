@@ -195,7 +195,8 @@ export function buildApplicationsRouter(
     res.sendFile(filePath);
   });
 
-  // POST /api/applications/:id/regenerate — re-enqueue a failed application
+  // POST /api/applications/:id/regenerate — re-enqueue with optional feedback
+  // Allowed from: failed, ready, applied
   router.post('/:id/regenerate', async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -207,12 +208,17 @@ export function buildApplicationsRouter(
       res.status(404).json({ error: 'not found' });
       return;
     }
-    if (app.status !== 'failed') {
+    if (!['failed', 'ready', 'applied'].includes(app.status)) {
       res.status(409).json({
         error: `cannot regenerate — current status is '${app.status}'`,
       });
       return;
     }
+
+    const feedback =
+      typeof req.body?.feedback === 'string' && req.body.feedback.trim()
+        ? req.body.feedback.trim()
+        : undefined;
 
     apps.updateStatus(id, 'queued');
     ctx.db
@@ -223,15 +229,115 @@ export function buildApplicationsRouter(
       applicationId: id,
       jobId: app.job_id,
       userId: app.user_id,
+      feedback,
     });
     ctx.db
       .prepare('UPDATE applications SET queue_job_id = ? WHERE id = ?')
       .run(bullJob.id ?? null, id);
 
-    apps.addEvent(id, 'generation.queued', { adapter: adapter.name, regenerate: true });
+    apps.addEvent(id, 'generation.queued', {
+      adapter: adapter.name,
+      regenerate: true,
+      hasFeedback: feedback !== undefined,
+    });
     bus.publish('application.queued', { applicationId: id, jobId: app.job_id });
 
     res.json({ application: apps.get(id) ?? app });
+  });
+
+  // GET /api/applications/:id/versions — list all versions (newest first)
+  router.get('/:id/versions', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const app = apps.get(id);
+    if (!app || app.user_id !== req.user!.username) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json({ versions: apps.listVersions(id) });
+  });
+
+  // GET /api/applications/:id/versions/:n/cover — cover letter for a specific version
+  router.get('/:id/versions/:n/cover', (req, res) => {
+    const id = Number(req.params.id);
+    const n = Number(req.params.n);
+    if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(n) || n <= 0) {
+      res.status(400).json({ error: 'invalid id or version number' });
+      return;
+    }
+    const app = apps.get(id);
+    if (!app || app.user_id !== req.user!.username) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const version = apps.getVersion(id, n);
+    if (!version || !version.cover_letter_path) {
+      res.status(404).json({ error: 'version not found or cover letter not available' });
+      return;
+    }
+    const filePath = path.resolve(storageRoot, version.cover_letter_path);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: 'cover letter file not found on disk' });
+      return;
+    }
+    const slug = app.job_company.replace(/\s+/g, '-').toLowerCase();
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="cover-letter-${slug}-v${n}.txt"`);
+    res.sendFile(filePath);
+  });
+
+  // GET /api/applications/:id/versions/:n/resume — tailored resume for a specific version
+  router.get('/:id/versions/:n/resume', (req, res) => {
+    const id = Number(req.params.id);
+    const n = Number(req.params.n);
+    if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(n) || n <= 0) {
+      res.status(400).json({ error: 'invalid id or version number' });
+      return;
+    }
+    const app = apps.get(id);
+    if (!app || app.user_id !== req.user!.username) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const version = apps.getVersion(id, n);
+    if (!version || !version.resume_path) {
+      res.status(404).json({ error: 'version not found or resume not available' });
+      return;
+    }
+    const filePath = path.resolve(storageRoot, version.resume_path);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: 'resume file not found on disk' });
+      return;
+    }
+    const slug = app.job_company.replace(/\s+/g, '-').toLowerCase();
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="resume-${slug}-v${n}.json"`);
+    res.sendFile(filePath);
+  });
+
+  // POST /api/applications/:id/versions/:n/activate — roll back to a prior version
+  router.post('/:id/versions/:n/activate', (req, res) => {
+    const id = Number(req.params.id);
+    const n = Number(req.params.n);
+    if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(n) || n <= 0) {
+      res.status(400).json({ error: 'invalid id or version number' });
+      return;
+    }
+    const app = apps.get(id);
+    if (!app || app.user_id !== req.user!.username) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const activated = apps.activateVersion(id, n);
+    if (!activated) {
+      res.status(404).json({ error: 'version not found' });
+      return;
+    }
+    apps.addEvent(id, 'version.activated', { versionNo: n });
+    res.json({ version: activated, application: apps.get(id) });
   });
 
   // POST /api/applications/:id/submit — mark as applied

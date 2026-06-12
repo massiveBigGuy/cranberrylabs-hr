@@ -35,6 +35,15 @@ function computeDiff(
   return JSON.stringify(changes);
 }
 
+export interface GenerationOptions {
+  versionNo?: number;
+  previousOutput?: {
+    coverLetter: string;
+    tailoredResume: Record<string, unknown>;
+  };
+  accumulatedFeedback?: string[];
+}
+
 export async function generateApplication(
   appId: number,
   job: JobInput,
@@ -42,6 +51,7 @@ export async function generateApplication(
   samples: WritingSampleRow[],
   adapter: LLMAdapter,
   storageRoot: string,
+  options: GenerationOptions = {},
 ): Promise<GenerationOutput> {
   let masterResumeObj: Record<string, unknown>;
   try {
@@ -62,24 +72,33 @@ export async function generateApplication(
       label: s.label,
       content: s.content,
     })),
+    previousOutput: options.previousOutput,
+    accumulatedFeedback: options.accumulatedFeedback,
   });
 
-  const dir = path.join(storageRoot, String(appId));
-  fs.mkdirSync(dir, { recursive: true });
+  // Versioned path: {appId}/v{n}/ when versionNo supplied, legacy {appId}/ otherwise.
+  const subdir = options.versionNo != null
+    ? path.join(storageRoot, String(appId), `v${options.versionNo}`)
+    : path.join(storageRoot, String(appId));
+  fs.mkdirSync(subdir, { recursive: true });
 
   const coverFilename = 'cover_letter.txt';
   const resumeFilename = 'resume.json';
 
-  fs.writeFileSync(path.join(dir, coverFilename), result.coverLetter, 'utf8');
+  fs.writeFileSync(path.join(subdir, coverFilename), result.coverLetter, 'utf8');
   fs.writeFileSync(
-    path.join(dir, resumeFilename),
+    path.join(subdir, resumeFilename),
     JSON.stringify(result.tailoredResume, null, 2),
     'utf8',
   );
 
+  const pathPrefix = options.versionNo != null
+    ? `${appId}/v${options.versionNo}`
+    : `${appId}`;
+
   return {
-    coverPath: `${appId}/${coverFilename}`,
-    resumePath: `${appId}/${resumeFilename}`,
+    coverPath: `${pathPrefix}/${coverFilename}`,
+    resumePath: `${pathPrefix}/${resumeFilename}`,
     diff: computeDiff(masterResumeObj, result.tailoredResume),
     modelUsed: result.modelUsed,
     inputTokens: result.inputTokens,

@@ -3,6 +3,48 @@ import path from 'node:path';
 import type { AppContext } from '../types';
 import type { RetentionRepo } from './repo';
 
+function pruneVersionFiles(ctx: AppContext, storageRoot: string): number {
+  // Find prunable version rows that still have file paths on disk.
+  // We prune old version files for ALL applications (pinned or not) since
+  // only the current version's files are needed; old version rows are kept
+  // for audit/history.
+  const prunable = ctx.db
+    .prepare(
+      `SELECT id, cover_letter_path, resume_path
+       FROM application_versions
+       WHERE prunable = 1 AND (cover_letter_path IS NOT NULL OR resume_path IS NOT NULL)`,
+    )
+    .all() as Array<{
+    id: number;
+    cover_letter_path: string | null;
+    resume_path: string | null;
+  }>;
+
+  let filesPruned = 0;
+  for (const v of prunable) {
+    if (v.cover_letter_path) {
+      const p = path.resolve(storageRoot, v.cover_letter_path);
+      if (fs.existsSync(p)) {
+        fs.rmSync(p, { force: true });
+        filesPruned++;
+      }
+    }
+    if (v.resume_path) {
+      const p = path.resolve(storageRoot, v.resume_path);
+      if (fs.existsSync(p)) {
+        fs.rmSync(p, { force: true });
+        filesPruned++;
+      }
+    }
+    ctx.db
+      .prepare(
+        `UPDATE application_versions SET cover_letter_path = NULL, resume_path = NULL WHERE id = ?`,
+      )
+      .run(v.id);
+  }
+  return filesPruned;
+}
+
 export async function nightlySweep(ctx: AppContext, repo: RetentionRepo): Promise<void> {
   const run = repo.startRun();
   let scanned = 0;
@@ -42,13 +84,16 @@ export async function nightlySweep(ctx: AppContext, repo: RetentionRepo): Promis
       purged++;
     }
 
+    // Prune individual version files for old versions of surviving applications.
+    const filesPruned = pruneVersionFiles(ctx, storageRoot);
+
     repo.finishRun(run.id, {
       apps_scanned: scanned,
       apps_purged: purged,
       apps_skipped_pinned: skipped,
       status: 'ok',
     });
-    ctx.logger.info('retention: sweep complete', { scanned, purged, skipped });
+    ctx.logger.info('retention: sweep complete', { scanned, purged, skipped, filesPruned });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     repo.finishRun(run.id, {

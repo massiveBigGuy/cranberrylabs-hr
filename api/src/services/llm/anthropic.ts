@@ -19,6 +19,28 @@ Return exactly two sections delimited by XML tags and nothing else:
 [valid JSON here — must be parseable]
 </tailored_resume>`;
 
+function buildFeedbackBlock(req: GenerationRequest): string {
+  const hasFeedback = req.accumulatedFeedback && req.accumulatedFeedback.length > 0;
+  const hasPrevious = req.previousOutput != null;
+  if (!hasPrevious && !hasFeedback) return '';
+
+  const parts: string[] = ['\n---\n'];
+  if (hasPrevious) {
+    parts.push(
+      `PREVIOUS COVER LETTER (your last output):\n${req.previousOutput!.coverLetter}`,
+      `\n---\n\nPREVIOUS TAILORED RESUME (your last output, JSON):\n${JSON.stringify(req.previousOutput!.tailoredResume, null, 2)}`,
+    );
+  }
+  if (hasFeedback) {
+    const notes = req.accumulatedFeedback!
+      .map((note, i) => `${i + 1}. ${note}`)
+      .join('\n');
+    parts.push(`\n---\n\nREVISION FEEDBACK (apply all, oldest first):\n${notes}`);
+  }
+  parts.push('\n');
+  return parts.join('\n');
+}
+
 function extractTag(text: string, tag: string): string | null {
   const open = `<${tag}>`;
   const close = `</${tag}>`;
@@ -58,6 +80,8 @@ export class AnthropicAdapter implements LLMAdapter {
             .join('\n\n---\n\n')
         : '(no writing samples provided)';
 
+    const feedbackBlock = buildFeedbackBlock(req);
+
     const userMessage = `Job: ${req.jobTitle} at ${req.company}
 
 ---
@@ -74,10 +98,10 @@ ${JSON.stringify(req.masterResume, null, 2)}
 
 WRITING SAMPLES (for voice calibration):
 ${samplesBlock}
-
+${feedbackBlock}
 ---
 
-Generate the cover letter and tailored resume now.`;
+${feedbackBlock ? 'Revise the cover letter and tailored resume to address all feedback notes above, keeping unchanged anything not mentioned.' : 'Generate the cover letter and tailored resume now.'}`;
 
     const message = await client.messages.create({
       model,

@@ -5,6 +5,14 @@ export interface GenerationRequest {
   masterResume: Record<string, unknown>;
   writingSamples: Array<{ kind: string; label: string; content: string }>;
   model?: string;
+  // Set on regeneration. The adapter folds these into the prompt so the model
+  // sees the latest draft and the accumulated steering without replaying a full
+  // conversation transcript. Both fields are absent on first-generation calls.
+  previousOutput?: {
+    coverLetter: string;
+    tailoredResume: Record<string, unknown>;
+  };
+  accumulatedFeedback?: string[];  // oldest → newest
 }
 
 export interface GenerationResult {

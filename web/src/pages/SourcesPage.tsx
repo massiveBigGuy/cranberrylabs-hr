@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   api,
   type Source,
+  type ScrapeRun,
+  type ScrapeRunsResponse,
   type SourcesListResponse,
   type ProfilesListResponse,
 } from '../lib/api';
@@ -10,6 +12,7 @@ import {
 export function SourcesPage() {
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const [createForm, setCreateForm] = useState({
     company_name: '',
     tenant_url: '',
@@ -170,6 +173,10 @@ export function SourcesPage() {
               key={source.id}
               source={source}
               profileName={source.profile_id != null ? (profileMap[source.profile_id] ?? null) : null}
+              expanded={expandedId === source.id}
+              onToggleHistory={() =>
+                setExpandedId(expandedId === source.id ? null : source.id)
+              }
               onToggle={(enabled) => toggleEnabled.mutate({ id: source.id, enabled })}
               onScrape={() => scrapeNow.mutate(source.id)}
               onDelete={() => {
@@ -192,12 +199,16 @@ export function SourcesPage() {
 function SourceRow({
   source,
   profileName,
+  expanded,
+  onToggleHistory,
   onToggle,
   onScrape,
   onDelete,
 }: {
   source: Source;
   profileName: string | null;
+  expanded: boolean;
+  onToggleHistory: () => void;
   onToggle: (enabled: boolean) => void;
   onScrape: () => void;
   onDelete: () => void;
@@ -212,67 +223,153 @@ function SourceRow({
       : 'bg-surface';
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-surface bg-surface/20">
-      <div
-        className={`w-2 h-2 rounded-full flex-shrink-0 ${statusColor}`}
-        title={source.last_status ?? 'never scraped'}
-      />
+    <div className="rounded-lg border border-surface bg-surface/20">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div
+          className={`w-2 h-2 rounded-full flex-shrink-0 ${statusColor}`}
+          title={source.last_status ?? 'never scraped'}
+        />
 
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium text-ink">{source.company_name}</span>
-          <span className="text-xs px-1.5 py-0.5 rounded bg-surface text-muted">
-            {source.platform}
-          </span>
-          {profileName && (
-            <span className="text-xs text-muted">{profileName}</span>
-          )}
-        </div>
-        {!isManual && (
-          <div className="text-xs text-muted truncate mt-0.5">{source.tenant_url}</div>
-        )}
-        {source.last_scraped_at && (
-          <div className="text-xs text-muted mt-0.5">
-            Last scraped {new Date(source.last_scraped_at).toLocaleDateString()}
-            {source.last_error && (
-              <span className="text-red-400 ml-2" title={source.last_error}>
-                — error
-              </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium text-ink">{source.company_name}</span>
+            <span className="text-xs px-1.5 py-0.5 rounded bg-surface text-muted">
+              {source.platform}
+            </span>
+            {profileName && (
+              <span className="text-xs text-muted">{profileName}</span>
             )}
           </div>
-        )}
+          {!isManual && (
+            <div className="text-xs text-muted truncate mt-0.5">{source.tenant_url}</div>
+          )}
+          {source.last_scraped_at && (
+            <div className="text-xs text-muted mt-0.5">
+              Last scraped {new Date(source.last_scraped_at).toLocaleDateString()}
+              {source.last_error && (
+                <span className="text-red-400 ml-2" title={source.last_error}>
+                  — error
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {!isManual && (
+            <>
+              <button
+                onClick={onToggleHistory}
+                className="text-xs px-2 py-1 rounded border border-surface text-muted hover:text-ink hover:border-ink/40 transition-colors"
+                title="Show scrape run history"
+              >
+                History {expanded ? '▲' : '▼'}
+              </button>
+              <button
+                onClick={() => onToggle(!source.enabled)}
+                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                  source.enabled
+                    ? 'border-accent/40 text-accent hover:bg-accent/10'
+                    : 'border-surface text-muted hover:text-ink'
+                }`}
+              >
+                {source.enabled ? 'Enabled' : 'Disabled'}
+              </button>
+              <button
+                onClick={onScrape}
+                disabled={!source.enabled}
+                className="text-xs px-2 py-1 rounded border border-surface text-muted hover:text-ink hover:border-ink/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Scrape now
+              </button>
+            </>
+          )}
+          <button
+            onClick={onDelete}
+            className="text-xs text-muted hover:text-red-400 transition-colors"
+            title="Delete source"
+          >
+            Delete
+          </button>
+        </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-shrink-0">
-        {!isManual && (
-          <>
-            <button
-              onClick={() => onToggle(!source.enabled)}
-              className={`text-xs px-2 py-1 rounded border transition-colors ${
-                source.enabled
-                  ? 'border-accent/40 text-accent hover:bg-accent/10'
-                  : 'border-surface text-muted hover:text-ink'
-              }`}
-            >
-              {source.enabled ? 'Enabled' : 'Disabled'}
-            </button>
-            <button
-              onClick={onScrape}
-              disabled={!source.enabled}
-              className="text-xs px-2 py-1 rounded border border-surface text-muted hover:text-ink hover:border-ink/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              Scrape now
-            </button>
-          </>
-        )}
-        <button
-          onClick={onDelete}
-          className="text-xs text-muted hover:text-red-400 transition-colors"
-          title="Delete source"
-        >
-          Delete
-        </button>
+      {expanded && !isManual && (
+        <SourceRunHistory sourceId={source.id} />
+      )}
+    </div>
+  );
+}
+
+function SourceRunHistory({ sourceId }: { sourceId: number }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['sources', sourceId, 'runs'],
+    queryFn: ({ signal }) =>
+      api.get<ScrapeRunsResponse>(`/api/sources/${sourceId}/runs`, signal),
+  });
+  const runs: ScrapeRun[] = data?.runs ?? [];
+
+  if (isLoading) {
+    return (
+      <div className="border-t border-surface px-4 py-2 text-xs text-muted">
+        Loading history…
       </div>
+    );
+  }
+
+  if (runs.length === 0) {
+    return (
+      <div className="border-t border-surface px-4 py-2 text-xs text-muted">
+        No scrape runs recorded yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-surface px-4 py-2">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left border-b border-surface/50">
+            <th className="pb-1 text-muted font-medium">Started</th>
+            <th className="pb-1 text-muted font-medium">Status</th>
+            <th className="pb-1 text-muted font-medium text-right">Found</th>
+            <th className="pb-1 text-muted font-medium text-right">New</th>
+            <th className="pb-1 text-muted font-medium">Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((run) => (
+            <tr key={run.id} className="border-b border-surface/30 last:border-0">
+              <td className="py-1 text-muted">
+                {new Date(run.started_at).toLocaleDateString(undefined, {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </td>
+              <td className="py-1">
+                <span
+                  className={
+                    run.status === 'ok'
+                      ? 'text-green-400'
+                      : run.status === 'running'
+                      ? 'text-blue-300'
+                      : 'text-red-400'
+                  }
+                >
+                  {run.status}
+                </span>
+              </td>
+              <td className="py-1 text-right text-muted">{run.jobs_found}</td>
+              <td className="py-1 text-right text-muted">{run.jobs_new}</td>
+              <td className="py-1 text-red-400 max-w-[200px] truncate">
+                {run.error_message ?? ''}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

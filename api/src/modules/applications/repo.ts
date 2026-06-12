@@ -1,5 +1,20 @@
 import type { DB } from '../../services/db';
 
+export interface ApplicationVersionRow {
+  id: number;
+  application_id: number;
+  version_no: number;
+  resume_path: string | null;
+  cover_letter_path: string | null;
+  resume_diff: string | null;
+  feedback: string | null;
+  model_used: string | null;
+  generation_notes: string | null;
+  is_current: number;
+  prunable: number;
+  created_at: string;
+}
+
 export interface ApplicationRow {
   id: number;
   job_id: number;
@@ -217,6 +232,95 @@ export class ApplicationsRepo {
   delete(id: number): boolean {
     const result = this.db.prepare('DELETE FROM applications WHERE id = ?').run(id);
     return result.changes > 0;
+  }
+
+  createVersion(data: {
+    applicationId: number;
+    versionNo: number;
+    resumePath: string | null;
+    coverPath: string | null;
+    diff: string | null;
+    modelUsed: string | null;
+    feedback: string | null;
+  }): ApplicationVersionRow {
+    return this.db
+      .prepare(
+        `INSERT INTO application_versions
+           (application_id, version_no, resume_path, cover_letter_path, resume_diff, model_used, feedback, is_current)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+         RETURNING *`,
+      )
+      .get(
+        data.applicationId,
+        data.versionNo,
+        data.resumePath,
+        data.coverPath,
+        data.diff,
+        data.modelUsed,
+        data.feedback,
+      ) as ApplicationVersionRow;
+  }
+
+  listVersions(applicationId: number): ApplicationVersionRow[] {
+    return this.db
+      .prepare(
+        'SELECT * FROM application_versions WHERE application_id = ? ORDER BY version_no DESC',
+      )
+      .all(applicationId) as ApplicationVersionRow[];
+  }
+
+  getCurrentVersion(applicationId: number): ApplicationVersionRow | null {
+    return (
+      (this.db
+        .prepare(
+          'SELECT * FROM application_versions WHERE application_id = ? AND is_current = 1',
+        )
+        .get(applicationId) as ApplicationVersionRow | undefined) ?? null
+    );
+  }
+
+  getVersion(applicationId: number, versionNo: number): ApplicationVersionRow | null {
+    return (
+      (this.db
+        .prepare(
+          'SELECT * FROM application_versions WHERE application_id = ? AND version_no = ?',
+        )
+        .get(applicationId, versionNo) as ApplicationVersionRow | undefined) ?? null
+    );
+  }
+
+  markPreviousVersionsPrunable(applicationId: number, currentVersionNo: number): void {
+    this.db
+      .prepare(
+        `UPDATE application_versions SET is_current = 0, prunable = 1
+         WHERE application_id = ? AND version_no != ?`,
+      )
+      .run(applicationId, currentVersionNo);
+  }
+
+  activateVersion(applicationId: number, versionNo: number): ApplicationVersionRow | null {
+    const version = this.getVersion(applicationId, versionNo);
+    if (!version) return null;
+    this.db
+      .prepare(
+        `UPDATE application_versions SET is_current = 1
+         WHERE application_id = ? AND version_no = ?`,
+      )
+      .run(applicationId, versionNo);
+    this.db
+      .prepare(
+        `UPDATE application_versions SET is_current = 0, prunable = 1
+         WHERE application_id = ? AND version_no != ?`,
+      )
+      .run(applicationId, versionNo);
+    this.db
+      .prepare(
+        `UPDATE applications
+         SET resume_path = ?, cover_letter_path = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(version.resume_path, version.cover_letter_path, applicationId);
+    return this.getVersion(applicationId, versionNo);
   }
 
   addEvent(applicationId: number, eventType: string, payload?: unknown): void {

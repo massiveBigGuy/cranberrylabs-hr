@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, type ApplicationWithJob, type RetentionPolicy } from '../lib/api';
+import {
+  api,
+  type ApplicationWithJob,
+  type ApplicationVersion,
+  type RetentionPolicy,
+} from '../lib/api';
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
@@ -270,10 +275,34 @@ function ApplicationDetailDrawer({
   });
 
   const regenerate = useMutation({
-    mutationFn: () => api.post(`/api/applications/${appId}/regenerate`, {}),
+    mutationFn: (feedback?: string) =>
+      api.post(`/api/applications/${appId}/regenerate`, { feedback }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['applications'] });
+      qc.invalidateQueries({ queryKey: ['applications', appId, 'versions'] });
       onClose();
+    },
+  });
+
+  const { data: versionsData } = useQuery({
+    queryKey: ['applications', appId, 'versions'],
+    queryFn: ({ signal }) =>
+      api.get<{ versions: ApplicationVersion[] }>(
+        `/api/applications/${appId}/versions`,
+        signal,
+      ),
+    enabled: open && !!app?.cover_letter_path,
+  });
+  const versions = versionsData?.versions ?? [];
+
+  const activateVersion = useMutation({
+    mutationFn: (versionNo: number) =>
+      api.post(`/api/applications/${appId}/versions/${versionNo}/activate`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+      qc.invalidateQueries({ queryKey: ['applications', appId] });
+      qc.invalidateQueries({ queryKey: ['applications', appId, 'versions'] });
+      qc.invalidateQueries({ queryKey: ['applications', appId, 'cover'] });
     },
   });
 
@@ -383,49 +412,54 @@ function ApplicationDetailDrawer({
                     <p className="text-xs font-mono">{app.generation_error}</p>
                   )}
                 </div>
-                <button
-                  onClick={() => regenerate.mutate()}
-                  disabled={regenerate.isPending}
-                  className="text-xs px-3 py-1.5 rounded border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
-                >
-                  {regenerate.isPending ? 'Queuing…' : 'Retry Generation'}
-                </button>
+                <RegenerateControl
+                  isPending={regenerate.isPending}
+                  onRegenerate={(feedback) => regenerate.mutate(feedback)}
+                  label="Retry Generation"
+                />
               </div>
             )}
 
             {/* Actions */}
             {(app.status === 'ready' || app.status === 'applied') && (
-              <div className="flex flex-wrap gap-2">
-                {app.status === 'ready' && (
-                  <SubmitControl
-                    isPending={submit.isPending}
-                    onSubmit={(notes) => submit.mutate(notes)}
-                  />
-                )}
-                {app.status === 'applied' && app.submitted_at && (
-                  <span className="text-xs text-muted py-1.5">
-                    Applied {new Date(app.submitted_at).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                    {app.submission_notes ? ` · ${app.submission_notes}` : ''}
-                  </span>
-                )}
-                <a
-                  href={`/api/applications/${app.id}/cover`}
-                  download
-                  className="text-xs px-3 py-1.5 rounded border border-surface text-muted hover:text-ink hover:border-muted transition-colors"
-                >
-                  Download Cover Letter
-                </a>
-                <a
-                  href={`/api/applications/${app.id}/resume`}
-                  download
-                  className="text-xs px-3 py-1.5 rounded border border-surface text-muted hover:text-ink hover:border-muted transition-colors"
-                >
-                  Download Resume JSON
-                </a>
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {app.status === 'ready' && (
+                    <SubmitControl
+                      isPending={submit.isPending}
+                      onSubmit={(notes) => submit.mutate(notes)}
+                    />
+                  )}
+                  {app.status === 'applied' && app.submitted_at && (
+                    <span className="text-xs text-muted py-1.5">
+                      Applied {new Date(app.submitted_at).toLocaleDateString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                      {app.submission_notes ? ` · ${app.submission_notes}` : ''}
+                    </span>
+                  )}
+                  <a
+                    href={`/api/applications/${app.id}/cover`}
+                    download
+                    className="text-xs px-3 py-1.5 rounded border border-surface text-muted hover:text-ink hover:border-muted transition-colors"
+                  >
+                    Download Cover Letter
+                  </a>
+                  <a
+                    href={`/api/applications/${app.id}/resume`}
+                    download
+                    className="text-xs px-3 py-1.5 rounded border border-surface text-muted hover:text-ink hover:border-muted transition-colors"
+                  >
+                    Download Resume JSON
+                  </a>
+                </div>
+                <RegenerateControl
+                  isPending={regenerate.isPending}
+                  onRegenerate={(feedback) => regenerate.mutate(feedback)}
+                  label="Regenerate with Feedback…"
+                />
               </div>
             )}
 
@@ -452,6 +486,75 @@ function ApplicationDetailDrawer({
                   Resume Changes
                 </h2>
                 <ResumeDiff diff={app.resume_diff} />
+              </section>
+            )}
+
+            {/* Version history */}
+            {versions.length > 1 && (
+              <section>
+                <h2 className="text-sm uppercase tracking-wide text-muted mb-2">
+                  Version History
+                </h2>
+                <div className="space-y-2">
+                  {versions.map((v) => (
+                    <div
+                      key={v.id}
+                      className={`px-3 py-2 rounded text-xs ${
+                        v.is_current
+                          ? 'bg-green-500/10 border border-green-500/20 text-green-300'
+                          : 'bg-surface/40 text-muted'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-ink">
+                          v{v.version_no}
+                          {v.is_current ? ' (current)' : ''}
+                        </span>
+                        <span className="text-muted">
+                          {new Date(v.created_at).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                      {v.model_used && (
+                        <p className="text-muted mt-0.5">{v.model_used}</p>
+                      )}
+                      {v.feedback && (
+                        <p className="mt-1 text-ink/70 italic">"{v.feedback}"</p>
+                      )}
+                      <div className="mt-2 flex gap-2">
+                        {v.cover_letter_path && (
+                          <a
+                            href={`/api/applications/${app.id}/versions/${v.version_no}/cover`}
+                            download
+                            className="text-muted hover:text-ink transition-colors"
+                          >
+                            Cover ↓
+                          </a>
+                        )}
+                        {v.resume_path && (
+                          <a
+                            href={`/api/applications/${app.id}/versions/${v.version_no}/resume`}
+                            download
+                            className="text-muted hover:text-ink transition-colors"
+                          >
+                            Resume ↓
+                          </a>
+                        )}
+                        {!v.is_current && (
+                          <button
+                            onClick={() => activateVersion.mutate(v.version_no)}
+                            disabled={activateVersion.isPending}
+                            className="text-accent hover:underline disabled:opacity-50"
+                          >
+                            Activate
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </section>
             )}
 
@@ -549,6 +652,63 @@ function ResumeDiff({ diff }: { diff: string }) {
 }
 
 // ─── Local controls ───────────────────────────────────────────────────────────
+
+function RegenerateControl({
+  onRegenerate,
+  isPending,
+  label,
+}: {
+  onRegenerate: (feedback?: string) => void;
+  isPending: boolean;
+  label: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [feedback, setFeedback] = useState('');
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        disabled={isPending}
+        className="text-xs px-3 py-1.5 rounded border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
+      >
+        {isPending ? 'Queuing…' : label}
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <textarea
+        value={feedback}
+        onChange={(e) => setFeedback(e.target.value)}
+        placeholder="Optional feedback for the model (e.g. 'Emphasize Kubernetes experience', 'Shorten to 3 paragraphs')"
+        className="w-full text-sm px-3 py-2 rounded bg-surface border border-surface text-ink resize-none"
+        rows={3}
+        autoFocus
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={() => {
+            onRegenerate(feedback.trim() || undefined);
+            setOpen(false);
+            setFeedback('');
+          }}
+          disabled={isPending}
+          className="text-xs px-3 py-1.5 rounded border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
+        >
+          {isPending ? 'Queuing…' : 'Regenerate'}
+        </button>
+        <button
+          onClick={() => { setOpen(false); setFeedback(''); }}
+          className="text-xs px-2 py-1.5 text-muted hover:text-ink"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function SubmitControl({
   onSubmit,
