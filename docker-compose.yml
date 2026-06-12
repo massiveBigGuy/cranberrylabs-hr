@@ -5,12 +5,17 @@
 #   - hr-redis : dedicated Redis for the BullMQ queue; isolated from any other
 #                Redis instance on the homelab
 #
-# No ports are published. The only way in is the reverse proxy (Caddy), which
-# joins the shared `cranberrylabs` network. See deploy/Caddyfile.snippet.
+# The hr container sits on two networks:
+#   - cranberrylabs          : shared external network that Caddy also joins.
+#                              Caddy proxies to http://cranberrylabs-hr:3000.
+#                              No host port is published — the only ingress is
+#                              through Caddy.
+#   - cranberrylabs-hr_default : internal network shared only with hr-redis.
+#                              Redis is not reachable from the Caddy network.
 #
-# If your existing shared network has a different name (e.g. `proxy`, `web`),
-# change `cranberrylabs` everywhere below to match — or rename the existing
-# network. The two services and the reverse proxy MUST be on the same network.
+# If your shared proxy network has a different name (e.g. `proxy`, `web`),
+# change `cranberrylabs` in the hr service networks list and the external
+# networks block below.
 
 services:
   hr:
@@ -20,8 +25,6 @@ services:
     image: cranberrylabs-hr:latest
     container_name: cranberrylabs-hr
     restart: unless-stopped
-    ports:
-      - "3000:3000"
     environment:
       - NODE_ENV=production
       - CONFIG_PATH=/app/config/production.yaml
@@ -43,6 +46,7 @@ services:
       hr-redis:
         condition: service_healthy
     networks:
+      - cranberrylabs
       - cranberrylabs-hr_default
     # Resource limits — modest, tune later. The scraper + LLM generation are
     # the heaviest consumers; this leaves headroom for both.
@@ -71,8 +75,8 @@ services:
       start_period: 5s
 
 networks:
+  cranberrylabs:
+    external: true
   cranberrylabs-hr_default:
-    # Set to `true` if the network is created by another stack (e.g. the proxy
-    # stack). Set to `false` (or remove `external`) to let this compose file
-    # own the network.
-    #external: true
+    # Internal network. Only hr and hr-redis are on it. Redis is not reachable
+    # from the cranberrylabs proxy network.

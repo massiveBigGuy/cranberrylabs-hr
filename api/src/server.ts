@@ -17,7 +17,28 @@ async function main() {
   const config = loadConfig();
   const db = openDatabase(config.database.path);
 
+  // Fail fast if a dev convenience config was left in place for a production run.
+  // The bypass silently disables all authentication for every request.
+  if (config.auth.dev_bypass_user && process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'SECURITY: auth.dev_bypass_user is set while NODE_ENV=production. ' +
+        'Remove it from your production config before starting the server.',
+    );
+  }
+
   const app = express();
+
+  // Minimal security headers. No external dependency — just tell browsers
+  // not to sniff MIME types, disallow framing, and suppress referers.
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('X-DNS-Prefetch-Control', 'off');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('X-Download-Options', 'noopen');
+    next();
+  });
+
   app.use(express.json({ limit: '1mb' }));
 
   // Liveness probe — placed before auth so the reverse proxy can health-check

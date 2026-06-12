@@ -20,18 +20,19 @@ function pruneVersionFiles(ctx: AppContext, storageRoot: string): number {
     resume_path: string | null;
   }>;
 
+  const resolvedRoot = storageRoot + path.sep;
   let filesPruned = 0;
   for (const v of prunable) {
     if (v.cover_letter_path) {
       const p = path.resolve(storageRoot, v.cover_letter_path);
-      if (fs.existsSync(p)) {
+      if (p.startsWith(resolvedRoot) && fs.existsSync(p)) {
         fs.rmSync(p, { force: true });
         filesPruned++;
       }
     }
     if (v.resume_path) {
       const p = path.resolve(storageRoot, v.resume_path);
-      if (fs.existsSync(p)) {
+      if (p.startsWith(resolvedRoot) && fs.existsSync(p)) {
         fs.rmSync(p, { force: true });
         filesPruned++;
       }

@@ -9,6 +9,12 @@ import { ApplicationsRepo, isApplicationStatus } from './repo';
 import { ResumeRepo } from '../resume/repo';
 import { bus } from '../../services/sse/bus';
 
+function withinStorageRoot(storageRoot: string, filePath: string): boolean {
+  // Ensure a resolved path stays inside the storage root. Defends against
+  // path traversal if a malicious relative path ever reaches a path column.
+  return filePath.startsWith(storageRoot + path.sep) || filePath === storageRoot;
+}
+
 export function buildApplicationsRouter(
   ctx: AppContext,
   adapter: LLMAdapter,
@@ -158,6 +164,10 @@ export function buildApplicationsRouter(
       return;
     }
     const filePath = path.resolve(storageRoot, app.cover_letter_path);
+    if (!withinStorageRoot(storageRoot, filePath)) {
+      res.status(400).json({ error: 'invalid path' });
+      return;
+    }
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: 'cover letter file not found on disk' });
       return;
@@ -185,6 +195,10 @@ export function buildApplicationsRouter(
       return;
     }
     const filePath = path.resolve(storageRoot, app.resume_path);
+    if (!withinStorageRoot(storageRoot, filePath)) {
+      res.status(400).json({ error: 'invalid path' });
+      return;
+    }
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: 'resume file not found on disk' });
       return;
@@ -279,6 +293,10 @@ export function buildApplicationsRouter(
       return;
     }
     const filePath = path.resolve(storageRoot, version.cover_letter_path);
+    if (!withinStorageRoot(storageRoot, filePath)) {
+      res.status(400).json({ error: 'invalid path' });
+      return;
+    }
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: 'cover letter file not found on disk' });
       return;
@@ -308,6 +326,10 @@ export function buildApplicationsRouter(
       return;
     }
     const filePath = path.resolve(storageRoot, version.resume_path);
+    if (!withinStorageRoot(storageRoot, filePath)) {
+      res.status(400).json({ error: 'invalid path' });
+      return;
+    }
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: 'resume file not found on disk' });
       return;
