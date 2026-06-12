@@ -27,6 +27,7 @@ import { resumeModule } from './resume';
 import { profilesModule } from './profiles';
 import { applicationsModule } from './applications';
 import { notificationsModule } from './notifications';
+import { retentionModule } from './retention';
 import { usersModule } from './users';
 
 export const modules: Module[] = [
@@ -37,7 +38,6 @@ export const modules: Module[] = [
   profilesModule,       // after resume (needs resume_004) + sources (needs sources_003)
   applicationsModule,
   notificationsModule,  // subscribes to bus events published by the applications worker
+  retentionModule,      // TTL policies, pin/unpin, nightly sweep
   usersModule,          // last: seeds admin + backfills user_id after all other migrations
-  // Future, added in their respective build-order steps:
-  //   retentionModule,  — step 10
 ];

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, type ApplicationWithJob } from '../lib/api';
+import { api, type ApplicationWithJob, type RetentionPolicy } from '../lib/api';
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
@@ -99,6 +99,18 @@ function ApplicationRow({
   app: ApplicationWithJob;
   onReview: () => void;
 }) {
+  const qc = useQueryClient();
+
+  const pin = useMutation({
+    mutationFn: () =>
+      app.pinned_at
+        ? api.delete(`/api/applications/${app.id}/pin`)
+        : api.post(`/api/applications/${app.id}/pin`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+    },
+  });
+
   return (
     <tr className="border-b border-surface/50 hover:bg-surface/20 transition-colors">
       <td className="py-3 px-4">
@@ -117,8 +129,18 @@ function ApplicationRow({
               year: 'numeric',
             })
           : '—'}
+        <ExpiryBadge app={app} />
       </td>
-      <td className="py-3 px-4 text-right">
+      <td className="py-3 px-4 text-right flex items-center justify-end gap-2">
+        <button
+          onClick={() => pin.mutate()}
+          disabled={pin.isPending}
+          title={app.pinned_at ? 'Pinned — click to unpin' : 'Pin (never auto-deleted)'}
+          className="text-base leading-none disabled:opacity-40 transition-colors"
+          style={{ color: app.pinned_at ? '#f59e0b' : '#6b7280' }}
+        >
+          {app.pinned_at ? '★' : '☆'}
+        </button>
         {app.status === 'ready' || app.status === 'applied' ? (
           <button
             onClick={onReview}
@@ -138,6 +160,32 @@ function ApplicationRow({
       </td>
     </tr>
   );
+}
+
+function ExpiryBadge({ app }: { app: ApplicationWithJob }) {
+  if (app.pinned_at) {
+    return (
+      <p className="text-amber-400 text-[10px] mt-0.5" title={`Pinned ${new Date(app.pinned_at).toLocaleDateString()}`}>
+        pinned
+      </p>
+    );
+  }
+  if (!app.expires_at) return null;
+
+  const daysLeft = Math.floor(
+    (new Date(app.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+  );
+
+  if (daysLeft < 0) {
+    return <p className="text-red-400 text-[10px] mt-0.5">expired</p>;
+  }
+  if (daysLeft === 0) {
+    return <p className="text-red-400 text-[10px] mt-0.5">expires today</p>;
+  }
+  if (daysLeft <= 2) {
+    return <p className="text-amber-400 text-[10px] mt-0.5">expires in {daysLeft}d</p>;
+  }
+  return <p className="text-muted text-[10px] mt-0.5">expires in {daysLeft}d</p>;
 }
 
 export function StatusBadge({ status }: { status: string }) {
@@ -204,6 +252,14 @@ function ApplicationDetailDrawer({
     enabled: canFetchCover,
   });
 
+  const { data: policiesData } = useQuery({
+    queryKey: ['retention', 'policies'],
+    queryFn: ({ signal }) =>
+      api.get<{ policies: RetentionPolicy[] }>('/api/retention/policies', signal),
+    enabled: open,
+  });
+  const policies = policiesData?.policies ?? [];
+
   const submit = useMutation({
     mutationFn: (notes: string) =>
       api.post(`/api/applications/${appId}/submit`, { notes }),
@@ -218,6 +274,26 @@ function ApplicationDetailDrawer({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['applications'] });
       onClose();
+    },
+  });
+
+  const pin = useMutation({
+    mutationFn: () =>
+      app?.pinned_at
+        ? api.delete(`/api/applications/${appId}/pin`)
+        : api.post(`/api/applications/${appId}/pin`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+      qc.invalidateQueries({ queryKey: ['applications', appId] });
+    },
+  });
+
+  const changePolicy = useMutation({
+    mutationFn: (policy: string) =>
+      api.patch(`/api/applications/${appId}/policy`, { policy }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+      qc.invalidateQueries({ queryKey: ['applications', appId] });
     },
   });
 
@@ -267,13 +343,25 @@ function ApplicationDetailDrawer({
         {app && (
           <div className="px-6 py-6 space-y-6">
             <div>
-              <h1 className="text-xl font-semibold text-ink">{app.job_title}</h1>
+              <div className="flex items-start justify-between gap-3">
+                <h1 className="text-xl font-semibold text-ink">{app.job_title}</h1>
+                <button
+                  onClick={() => pin.mutate()}
+                  disabled={pin.isPending}
+                  title={app.pinned_at ? 'Pinned — click to unpin' : 'Pin (never auto-deleted)'}
+                  className="text-2xl leading-none flex-shrink-0 disabled:opacity-40 transition-colors"
+                  style={{ color: app.pinned_at ? '#f59e0b' : '#6b7280' }}
+                >
+                  {app.pinned_at ? '★' : '☆'}
+                </button>
+              </div>
               <p className="text-muted text-sm mt-1">{app.job_company}</p>
               <div className="mt-2 flex items-center gap-3">
                 <StatusBadge status={app.status} />
                 {app.model_used && (
                   <span className="text-xs text-muted">{app.model_used}</span>
                 )}
+                <ExpiryBadge app={app} />
               </div>
             </div>
 
@@ -366,6 +454,40 @@ function ApplicationDetailDrawer({
                 <ResumeDiff diff={app.resume_diff} />
               </section>
             )}
+
+            {/* Retention */}
+            <div className="pt-2 border-t border-surface space-y-3">
+              <h2 className="text-sm uppercase tracking-wide text-muted">Retention</h2>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-muted w-14 flex-shrink-0">Policy</label>
+                <select
+                  value={app.retention_policy}
+                  disabled={changePolicy.isPending || policies.length === 0}
+                  onChange={(e) => changePolicy.mutate(e.target.value)}
+                  className="text-xs px-2 py-1 rounded bg-surface border border-surface text-ink disabled:opacity-50"
+                >
+                  {policies.map((p) => (
+                    <option key={p.id} value={p.name}>
+                      {p.name}
+                      {p.ttl_days !== null ? ` (${p.ttl_days}d)` : ' (forever)'}
+                      {p.description ? ` — ${p.description}` : ''}
+                    </option>
+                  ))}
+                  {policies.length === 0 && (
+                    <option value={app.retention_policy}>{app.retention_policy}</option>
+                  )}
+                </select>
+              </div>
+              {app.pinned_at ? (
+                <p className="text-xs text-amber-400">
+                  Pinned on {new Date(app.pinned_at).toLocaleDateString()} — exempt from auto-deletion
+                </p>
+              ) : app.expires_at ? (
+                <ExpiryBadge app={app} />
+              ) : (
+                <p className="text-xs text-muted">No expiry set</p>
+              )}
+            </div>
 
             {/* Delete */}
             <div className="pt-2 border-t border-surface">

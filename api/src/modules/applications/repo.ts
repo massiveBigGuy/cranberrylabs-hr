@@ -64,8 +64,8 @@ export class ApplicationsRepo {
   create(jobId: number, userId: string, resumeVersionId: number | null): ApplicationRow {
     return this.db
       .prepare(
-        `INSERT INTO applications (job_id, user_id, status, resume_version_id)
-         VALUES (?, ?, 'queued', ?)
+        `INSERT INTO applications (job_id, user_id, status, resume_version_id, expires_at)
+         VALUES (?, ?, 'queued', ?, datetime('now', '+7 days'))
          RETURNING *`,
       )
       .get(jobId, userId, resumeVersionId ?? null) as ApplicationRow;
@@ -171,6 +171,45 @@ export class ApplicationsRepo {
          WHERE id = ?`,
       )
       .run(notes ?? null, id);
+    if (!result.changes) return null;
+    return this.db.prepare('SELECT * FROM applications WHERE id = ?').get(id) as ApplicationRow;
+  }
+
+  pin(id: number): ApplicationRow | null {
+    const result = this.db
+      .prepare(
+        `UPDATE applications SET pinned_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+      )
+      .run(id);
+    if (!result.changes) return null;
+    return this.db.prepare('SELECT * FROM applications WHERE id = ?').get(id) as ApplicationRow;
+  }
+
+  unpin(id: number): ApplicationRow | null {
+    const result = this.db
+      .prepare(
+        `UPDATE applications SET pinned_at = NULL, updated_at = datetime('now') WHERE id = ?`,
+      )
+      .run(id);
+    if (!result.changes) return null;
+    return this.db.prepare('SELECT * FROM applications WHERE id = ?').get(id) as ApplicationRow;
+  }
+
+  setPolicy(id: number, policyName: string, ttlDays: number | null): ApplicationRow | null {
+    const expiresAt =
+      ttlDays !== null
+        ? (this.db
+            .prepare(`SELECT datetime('now', ?)`)
+            .pluck()
+            .get(`+${ttlDays} days`) as string)
+        : null;
+    const result = this.db
+      .prepare(
+        `UPDATE applications
+         SET retention_policy = ?, expires_at = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(policyName, expiresAt, id);
     if (!result.changes) return null;
     return this.db.prepare('SELECT * FROM applications WHERE id = ?').get(id) as ApplicationRow;
   }

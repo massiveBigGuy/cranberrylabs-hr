@@ -241,6 +241,10 @@ export interface ApplicationWithJob {
   generated_at: string | null;
   submitted_at: string | null;
   submission_notes: string | null;
+  pinned_at: string | null;
+  retention_policy: string;
+  expires_at: string | null;
+  purged_at: string | null;
   created_at: string;
   updated_at: string;
   // joined from jobs
@@ -248,6 +252,17 @@ export interface ApplicationWithJob {
   job_company: string;
   job_url: string;
   job_fit_score: number | null;
+}
+
+// ---------- Retention module ----------
+
+export interface RetentionPolicy {
+  id: number;
+  name: string;
+  description: string | null;
+  ttl_days: number | null;
+  is_default: number;
+  created_at: string;
 }
 
 export interface ApplicationsListResponse {

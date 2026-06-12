@@ -258,6 +258,63 @@ export function buildApplicationsRouter(
     res.json({ application: updated ?? app });
   });
 
+  // POST /api/applications/:id/pin — exempt from retention sweep
+  router.post('/:id/pin', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const app = apps.get(id);
+    if (!app || app.user_id !== req.user!.username) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json({ application: apps.pin(id) ?? app });
+  });
+
+  // DELETE /api/applications/:id/pin — remove pin; application is eligible for sweep again
+  router.delete('/:id/pin', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const app = apps.get(id);
+    if (!app || app.user_id !== req.user!.username) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json({ application: apps.unpin(id) ?? app });
+  });
+
+  // PATCH /api/applications/:id/policy — change retention policy
+  router.patch('/:id/policy', (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'invalid id' });
+      return;
+    }
+    const app = apps.get(id);
+    if (!app || app.user_id !== req.user!.username) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const policyName = req.body?.policy;
+    if (typeof policyName !== 'string' || !policyName.trim()) {
+      res.status(400).json({ error: 'policy name is required' });
+      return;
+    }
+    const policyRow = ctx.db
+      .prepare('SELECT ttl_days FROM retention_policies WHERE name = ?')
+      .get(policyName.trim()) as { ttl_days: number | null } | undefined;
+    if (!policyRow) {
+      res.status(400).json({ error: `unknown policy: ${policyName}` });
+      return;
+    }
+    res.json({ application: apps.setPolicy(id, policyName.trim(), policyRow.ttl_days) ?? app });
+  });
+
   // DELETE /api/applications/:id — delete row + clean up generated files
   router.delete('/:id', (req, res) => {
     const id = Number(req.params.id);

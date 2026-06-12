@@ -42,7 +42,7 @@ Build-order progress:
 - [x] Step 7.3 — Manual job entry (synthetic source)
 - [x] Step 8 — Ollama adapter + model toggle
 - [x] Step 9 — Notifications
-- [ ] Step 10 — Retention
+- [x] Step 10 — Retention
 - [ ] Step 11 — Polish (scrape_runs admin view, regenerate-with-feedback, etc.)
 
 ---
@@ -975,7 +975,7 @@ Annotated with current status:
     enqueue dialog. Orthogonal to profiles (model is not a profile attr).
 13. [x] **Step 9 — Notifications module.** Browser push + webhook
     channel. Fires on `queue.drained`.
-14. [ ] **Step 10 — Retention module.** Sweep cron, pin/unpin
+14. [x] **Step 10 — Retention module.** Sweep cron, pin/unpin
     endpoints, expiry badges. Default 7-day policy.
 15. [ ] **Step 11 — Polish.** Scrape_runs admin view, `/profiles` and
     `/sources` management UI, and **regenerate-with-feedback** — an
