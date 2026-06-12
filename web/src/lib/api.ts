@@ -136,6 +136,7 @@ export interface JobsListResponse {
 export interface JobDetailResponse {
   job: Job;
   tags: Tag[];
+  profile: Profile | null;
 }
 
 // ---------- Sources module ----------

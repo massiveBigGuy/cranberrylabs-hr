@@ -49,7 +49,6 @@ export async function nightlySweep(ctx: AppContext, repo: RetentionRepo): Promis
   const run = repo.startRun();
   let scanned = 0;
   let purged = 0;
-  const skipped = 0;
 
   try {
     const candidates = repo.findPurgeCandidates();
@@ -90,16 +89,16 @@ export async function nightlySweep(ctx: AppContext, repo: RetentionRepo): Promis
     repo.finishRun(run.id, {
       apps_scanned: scanned,
       apps_purged: purged,
-      apps_skipped_pinned: skipped,
+      apps_skipped_pinned: 0,
       status: 'ok',
     });
-    ctx.logger.info('retention: sweep complete', { scanned, purged, skipped, filesPruned });
+    ctx.logger.info('retention: sweep complete', { scanned, purged, filesPruned });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     repo.finishRun(run.id, {
       apps_scanned: scanned,
       apps_purged: purged,
-      apps_skipped_pinned: skipped,
+      apps_skipped_pinned: 0,
       status: 'error',
       error_message: msg,
     });

@@ -27,7 +27,13 @@ export const notificationsModule: Module = {
         sseEvent.event === 'queue.drained' &&
         ctx.config.notifications.on_queue_complete
       ) {
-        await service.sendQueueDrained({ timestamp: new Date().toISOString() });
+        try {
+          await service.sendQueueDrained({ timestamp: new Date().toISOString() });
+        } catch (err) {
+          ctx.logger.error('notifications: sendQueueDrained failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     });
 
