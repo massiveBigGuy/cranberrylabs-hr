@@ -26,6 +26,7 @@ import { jobsModule } from './jobs';
 import { resumeModule } from './resume';
 import { profilesModule } from './profiles';
 import { applicationsModule } from './applications';
+import { notificationsModule } from './notifications';
 import { usersModule } from './users';
 
 export const modules: Module[] = [
@@ -33,10 +34,10 @@ export const modules: Module[] = [
   scraperModule,
   jobsModule,
   resumeModule,
-  profilesModule,    // after resume (needs resume_004) + sources (needs sources_003)
+  profilesModule,       // after resume (needs resume_004) + sources (needs sources_003)
   applicationsModule,
-  usersModule,       // last: seeds admin + backfills user_id after all other migrations
+  notificationsModule,  // subscribes to bus events published by the applications worker
+  usersModule,          // last: seeds admin + backfills user_id after all other migrations
   // Future, added in their respective build-order steps:
-  //   notificationsModule,  — step 9
-  //   retentionModule,      — step 10
+  //   retentionModule,  — step 10
 ];

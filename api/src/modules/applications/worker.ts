@@ -117,6 +117,14 @@ export function buildGenerationWorker(
     { concurrency: ctx.config.queue.concurrency },
   );
 
+  // When the queue empties (no more waiting or active jobs), publish the
+  // queue.drained event. The notifications module subscribes to this on the
+  // SSE bus and fans out to configured channels (webhooks, browser push).
+  worker.on('drained', () => {
+    bus.publish('queue.drained', { timestamp: new Date().toISOString() });
+    ctx.logger.info('applications: generation queue drained');
+  });
+
   // After all retries are exhausted BullMQ fires this event. We mark the
   // application permanently failed here so intermediate retry attempts don't
   // flip the status prematurely (the processor leaves status = 'generating'

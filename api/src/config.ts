@@ -22,7 +22,15 @@ export interface AppConfig {
       min_posted_date_days_ago: number;
     };
   };
-  notifications: { on_queue_complete: boolean; channels: unknown[] };
+  notifications: {
+    on_queue_complete: boolean;
+    channels: Array<{ type: string; url: string; name?: string }>;
+    push?: {
+      vapid_public: string;
+      vapid_private: string;
+      vapid_subject: string;
+    };
+  };
   auth: { dev_bypass_user: string | null };
   users?: { initial_admin?: string | null };
 }

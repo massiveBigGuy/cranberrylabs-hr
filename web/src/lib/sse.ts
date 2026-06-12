@@ -48,6 +48,9 @@ export function useSseInvalidator() {
     es.addEventListener('application.failed', () => {
       qc.invalidateQueries({ queryKey: ['applications'] });
     });
+    es.addEventListener('queue.drained', () => {
+      qc.invalidateQueries({ queryKey: ['applications'] });
+    });
 
     // The default 'message' event is what unnamed events come in as.
     // The step-2 bus formats events with `event: <name>` so we get

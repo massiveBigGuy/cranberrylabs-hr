@@ -46,6 +46,17 @@ scraper:
 notifications:
   on_queue_complete: true
   channels: []
+  # Webhook example — add to config/production.yaml:
+  #   channels:
+  #     - type: webhook
+  #       url: https://discord.com/api/webhooks/...
+  #       name: Discord
+  push:
+    # Generate once: npx web-push generate-vapid-keys
+    # Populate in config/production.yaml; leave empty here to disable push.
+    vapid_public: ''
+    vapid_private: ''
+    vapid_subject: 'mailto:admin@cranberrylabs.net'
 
 # Auth: see §13. The API trusts forwarded headers from Authelia.
 # In dev, set auth.dev_bypass_user to skip the middleware reject.

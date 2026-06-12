@@ -41,7 +41,7 @@ Build-order progress:
 - [x] Step 7.2 — Profiles (per-role-type filter + resume + voice)
 - [x] Step 7.3 — Manual job entry (synthetic source)
 - [x] Step 8 — Ollama adapter + model toggle
-- [ ] Step 9 — Notifications
+- [x] Step 9 — Notifications
 - [ ] Step 10 — Retention
 - [ ] Step 11 — Polish (scrape_runs admin view, regenerate-with-feedback, etc.)
 
@@ -973,7 +973,7 @@ Annotated with current status:
     §18.
 12. [x] **Step 8 — Ollama adapter + model toggle.** UI switch on the
     enqueue dialog. Orthogonal to profiles (model is not a profile attr).
-13. [ ] **Step 9 — Notifications module.** Browser push + webhook
+13. [x] **Step 9 — Notifications module.** Browser push + webhook
     channel. Fires on `queue.drained`.
 14. [ ] **Step 10 — Retention module.** Sweep cron, pin/unpin
     endpoints, expiry badges. Default 7-day policy.
