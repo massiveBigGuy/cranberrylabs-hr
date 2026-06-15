@@ -6,6 +6,7 @@ import type { AppContext } from '../types';
 import type { LLMAdapter } from '../../services/llm';
 import type { GenerationJobData } from './worker';
 import { ApplicationsRepo, isApplicationStatus } from './repo';
+import { SavedPromptsRepo } from './repo-prompts';
 import { ResumeRepo } from '../resume/repo';
 import { bus } from '../../services/sse/bus';
 import { SYSTEM_PROMPT } from '../../services/llm/utils';
@@ -23,6 +24,7 @@ export function buildApplicationsRouter(
 ): Router {
   const router = Router();
   const apps = new ApplicationsRepo(ctx.db);
+  const savedPrompts = new SavedPromptsRepo(ctx.db);
   const resume = new ResumeRepo(ctx.db);
   const storageRoot = path.resolve(ctx.config.storage.root);
 
@@ -46,6 +48,93 @@ export function buildApplicationsRouter(
   // Must stay above any /:id route so 'prompt' isn't swallowed by the wildcard.
   router.get('/prompt', (_req, res) => {
     res.json({ prompt: SYSTEM_PROMPT });
+  });
+
+  // GET /api/applications/prompts — list saved system prompt overrides
+  // Must stay before /:id so 'prompts' isn't swallowed by the wildcard.
+  router.get('/prompts', (req, res) => {
+    const userId = req.user!.username;
+    res.json({ prompts: savedPrompts.list(userId) });
+  });
+
+  // POST /api/applications/prompts — create a saved prompt
+  router.post('/prompts', (req, res) => {
+    const userId = req.user!.username;
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
+    if (!name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    if (!content) {
+      res.status(400).json({ error: 'content is required' });
+      return;
+    }
+    try {
+      const saved = savedPrompts.create(userId, name, content);
+      res.status(201).json({ prompt: saved });
+    } catch (err: unknown) {
+      const sqliteErr = err as { code?: string };
+      if (sqliteErr.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        const existing = savedPrompts.getByName(userId, name);
+        res.status(409).json({ error: `a prompt named "${name}" already exists`, id: existing?.id });
+      } else {
+        throw err;
+      }
+    }
+  });
+
+  // PATCH /api/applications/prompts/:promptId — update name and/or content
+  router.patch('/prompts/:promptId', (req, res) => {
+    const userId = req.user!.username;
+    const promptId = Number(req.params.promptId);
+    if (!Number.isInteger(promptId) || promptId <= 0) {
+      res.status(400).json({ error: 'invalid promptId' });
+      return;
+    }
+    const existing = savedPrompts.get(promptId, userId);
+    if (!existing) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const fields: { name?: string; content?: string } = {};
+    if (typeof req.body?.name === 'string' && req.body.name.trim()) {
+      fields.name = req.body.name.trim();
+    }
+    if (typeof req.body?.content === 'string' && req.body.content.trim()) {
+      fields.content = req.body.content.trim();
+    }
+    if (!fields.name && !fields.content) {
+      res.status(400).json({ error: 'at least one of name or content is required' });
+      return;
+    }
+    try {
+      const updated = savedPrompts.update(promptId, userId, fields);
+      res.json({ prompt: updated ?? existing });
+    } catch (err: unknown) {
+      const sqliteErr = err as { code?: string };
+      if (sqliteErr.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        res.status(409).json({ error: `a prompt named "${fields.name}" already exists` });
+      } else {
+        throw err;
+      }
+    }
+  });
+
+  // DELETE /api/applications/prompts/:promptId — remove a saved prompt
+  router.delete('/prompts/:promptId', (req, res) => {
+    const userId = req.user!.username;
+    const promptId = Number(req.params.promptId);
+    if (!Number.isInteger(promptId) || promptId <= 0) {
+      res.status(400).json({ error: 'invalid promptId' });
+      return;
+    }
+    const deleted = savedPrompts.delete(promptId, userId);
+    if (!deleted) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.status(204).end();
   });
 
   // POST /api/applications — enqueue generation for a job (returns 202 immediately)

@@ -41,9 +41,9 @@ Build-order progress:
 - [x] Step 7.2 — Profiles (per-role-type filter + resume + voice)
 - [x] Step 7.3 — Manual job entry (synthetic source)
 - [x] Step 8 — Ollama adapter + model toggle
-- [x] Step 9 — Notifications
-- [x] Step 10 — Retention
-- [x] Step 11 — Polish (scrape runs history, regenerate-with-feedback, version history)
+- [x] Step 9 — Notifications (browser push + webhooks)
+- [x] Step 10 — Retention (nightly sweep, pin/unpin, named policies)
+- [x] Step 11 — Polish (sources + profiles UI, scrape-run history, regenerate-with-feedback, version history, saved system prompts)
 
 ---
 
@@ -95,10 +95,9 @@ or filesystem.
                               │ (volume) │ │(BullMQ)│
                               └──────────┘ └────────┘
 
-  NOTE: Modules registered through step 7.1 — sources, scraper, jobs,
-  resume, applications, users. Future modules (profiles, notifications,
-  retention) drop into the same registry per the build order. LLM
-  adapters shipped in step 6 (Anthropic); Ollama planned for step 8.
+  NOTE: All nine modules registered — sources, scraper, jobs, resume,
+  applications, users, profiles, notifications, retention. Both LLM
+  adapters shipped: Anthropic (step 6) and Ollama (step 8).
 ```
 
 ### Service Boundaries
@@ -166,8 +165,8 @@ canonical example.
 | `applications` | shipped (step 6) | Generation queue, tailored doc storage, status |
 | `users` | shipped (step 7.1) | User registry, role assignments, permission checks |
 | `profiles` | shipped (step 7.2) | Per-role-type bundle: filter keywords + resume version + writing samples |
-| `notifications` | planned (step 9) | Browser push / webhook / email |
-| `retention` | planned (step 10) | TTL policies, pin/unpin, nightly sweep |
+| `notifications` | shipped (step 9) | Browser push (Web Push API) + webhook channels, fires on queue drained |
+| `retention` | shipped (step 10) | Named TTL policies, pin/unpin, nightly sweep, audit log |
 
 ---
 
@@ -263,7 +262,7 @@ Detail-fetch status values: `'pending' | 'ok' | 'gave_up'`. A job
 flips to `'gave_up'` after 5 consecutive failed detail fetches and
 is excluded from future sweeps.
 
-### `profiles` — per-role-type bundle [planned, step 7.2]
+### `profiles` — per-role-type bundle [shipped, step 7.2]
 
 Created in `profiles_001_init`. A profile bundles the three things
 that diverge when one user pursues more than one kind of role at once
@@ -439,10 +438,9 @@ CREATE TABLE application_events (
 );
 ```
 
-### `application_versions` — generation history [planned, step 11]
+### `application_versions` — generation history [shipped, step 11]
 
-Created in the next sequential applications migration
-(`applications_*_versions`) at step 11. Each successful generation —
+Created in `applications_002_versions`. Each successful generation —
 the initial one and every feedback-driven regeneration — writes a row
 here. The `applications` row points at the current version via the
 `is_current` flag (exactly one per application); its `resume_path` /
@@ -476,6 +474,28 @@ CREATE TABLE application_versions (
 CREATE INDEX idx_app_versions_app ON application_versions(application_id);
 ```
 
+### `saved_prompts` — named system-prompt overrides [shipped, step 11]
+
+Created in `applications_003_saved_prompts`. Stores per-user named
+overrides for the LLM system prompt. Selected from the "Advanced" panel
+in the generate and regenerate dialogs, or managed via the `/prompts`
+page. Scoped to the `applications` module (not a standalone module)
+because saved prompts are a generation concern.
+
+```sql
+CREATE TABLE saved_prompts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT    NOT NULL,
+  name       TEXT    NOT NULL,
+  content    TEXT    NOT NULL,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, name)
+);
+
+CREATE INDEX idx_saved_prompts_user ON saved_prompts(user_id);
+```
+
 ### `users` — user registry [shipped, step 7.1]
 
 ```sql
@@ -489,10 +509,42 @@ CREATE TABLE users (
 );
 ```
 
-### Retention tables [planned, step 10]
+### Retention tables [shipped, step 10]
 
-`retention_policies`, `retention_runs`, `retention_events` — see v1
-schema §14 for full DDL. Unchanged from original design.
+Created in `retention_001_tables`. Three pre-seeded policies: `default`
+(7 days), `keep-30d` (30 days), `forever` (null TTL = never purge).
+
+```sql
+CREATE TABLE retention_policies (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT    NOT NULL UNIQUE,
+  description TEXT,
+  ttl_days    INTEGER,                            -- null = never purge
+  is_default  INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE retention_runs (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+  finished_at         TEXT,
+  apps_scanned        INTEGER DEFAULT 0,
+  apps_purged         INTEGER DEFAULT 0,
+  apps_skipped_pinned INTEGER DEFAULT 0,
+  status              TEXT,
+  error_message       TEXT
+);
+
+CREATE TABLE retention_events (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  application_id INTEGER NOT NULL,
+  job_title      TEXT,
+  company        TEXT,
+  action         TEXT    NOT NULL,
+  reason         TEXT,
+  created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+```
 
 ---
 
@@ -555,7 +607,7 @@ detail now includes the derived profile (resolved through
 Route ordering: `GET /stats` registers BEFORE `GET /:id` to prevent
 the `:id` wildcard from matching the literal string `stats`.
 
-### Profiles [planned, step 7.2]
+### Profiles [shipped, step 7.2]
 
 ```
 GET    /api/profiles                 list current user's profiles (default first)
@@ -573,30 +625,35 @@ profile clears it on the user's others (single default invariant).
 profile with attached sources must have them reassigned first (the
 error body names the blocking sources).
 
-### Applications (Generation Queue) [shipped steps 6 + 7]
+### Applications (Generation Queue) [shipped steps 6 + 7 + 10 + 11]
 
 ```
-POST   /api/applications             enqueue generation (BullMQ, 202)
-GET    /api/applications             list; ?status=ready&job_id=42
-GET    /api/applications/queue       live queue status (step 7)
-GET    /api/applications/:id         detail + paths
-GET    /api/applications/:id/cover   stream cover letter (text/plain)
-GET    /api/applications/:id/resume  stream tailored resume (application/json) — current version
-POST   /api/applications/:id/regenerate  regenerate (step 7); accepts { feedback? } at step 11
-GET    /api/applications/:id/versions          list versions, newest first (step 11)
-GET    /api/applications/:id/versions/:n/cover  stream a specific version's cover letter (step 11)
-GET    /api/applications/:id/versions/:n/resume stream a specific version's resume (step 11)
-POST   /api/applications/:id/versions/:n/activate  make version n current — rollback/selection (step 11)
-POST   /api/applications/:id/submit  mark applied; { notes? }
-DELETE /api/applications/:id         delete + clean up generated files; resets job → 'reviewing'
+GET    /api/applications/prompt          built-in system prompt text (for pre-populating the editor)
+GET    /api/applications/prompts         list saved system-prompt overrides (step 11)
+POST   /api/applications/prompts         create saved prompt { name, content } → 201 / 409 (step 11)
+PATCH  /api/applications/prompts/:id     update name and/or content (step 11)
+DELETE /api/applications/prompts/:id     delete saved prompt → 204 (step 11)
+POST   /api/applications                 enqueue generation (BullMQ, 202)
+                                           body: { job_id, adapter?, system_prompt? }
+GET    /api/applications                 list; ?status=ready&job_id=42
+GET    /api/applications/queue           live queue status
+GET    /api/applications/:id             detail + paths
+GET    /api/applications/:id/cover       stream cover letter (text/plain)
+GET    /api/applications/:id/resume      stream tailored resume (application/json) — current version
+POST   /api/applications/:id/regenerate  re-enqueue; { feedback?, system_prompt? } (step 11)
+GET    /api/applications/:id/versions    list versions, newest first (step 11)
+GET    /api/applications/:id/versions/:n/cover    cover letter for version n (step 11)
+GET    /api/applications/:id/versions/:n/resume   resume for version n (step 11)
+POST   /api/applications/:id/versions/:n/activate make version n current — rollback (step 11)
+POST   /api/applications/:id/submit      mark applied; { notes? }
+POST   /api/applications/:id/pin         exempt from retention sweep (step 10)
+DELETE /api/applications/:id/pin         remove pin (step 10)
+PATCH  /api/applications/:id/policy      assign named retention policy (step 10)
+DELETE /api/applications/:id             delete + clean up files; resets job → 'reviewing'
 ```
 
-**[revised from v1]** Step 6 shipped synchronous generation; step 7 moved it
-into a BullMQ worker. `POST /api/applications` returns 202 immediately;
-the worker processes jobs with 3 attempts (2 retries) for transient LLM
-failures. `queue_job_id` is populated on enqueue. File outputs are plain
-text/JSON at `storage/applications/{id}/`. DOCX rendering is deferred to
-step 11 polish.
+Route ordering: all static sub-paths (`/prompt`, `/prompts`, `/queue`)
+register before the `/:id` wildcard.
 
 **[7.1]** The `DELETE` handler resets the underlying job from `ready`
 back to `reviewing` (fixed the stale-status parked issue).
@@ -604,10 +661,18 @@ back to `reviewing` (fixed the stale-status parked issue).
 **[7.2]** Generation resolves the resume version and writing samples
 from the job's profile, not from global active flags — see §5.
 
-**[planned, step 11]** `regenerate` accepts an optional `feedback`
-string; each successful generation writes an `application_versions`
-row, and `/versions/:n/activate` selects which version is current
-(download/submit target). See §19.
+**[10]** `pin`/`unpin` and `/policy` endpoints added; the generation
+worker sets an `expires_at` on each new application row based on the
+resolved policy's `ttl_days`.
+
+**[11]** `regenerate` accepts an optional `feedback` string and an
+optional `system_prompt` override. Each successful generation writes
+an `application_versions` row; `/versions/:n/activate` selects which
+version is current (download/submit target). The `/prompts` CRUD
+surface plus `GET /prompt` lets the frontend pre-populate and save
+system-prompt overrides. File outputs are plain text/JSON at
+`storage/applications/{id}/` (v1) and `storage/applications/{id}/v{n}/`
+(subsequent versions). See §19.
 
 ### Resume & Writing [shipped, step 5]
 
@@ -638,9 +703,40 @@ PATCH  /api/users/:username/role     admin only; { role: 'user' | 'viewer' }
 GET    /api/users/me                 current user's profile + role
 ```
 
-### Retention [planned, step 10]
+### Notifications [shipped, step 9]
 
-Unchanged from v1.
+```
+GET    /api/notifications/vapid-key  public VAPID key + enabled flag (for frontend push setup)
+POST   /api/notifications/subscribe  register a browser push subscription { endpoint, keys }
+DELETE /api/notifications/subscribe  unregister by endpoint { endpoint }
+POST   /api/notifications/test       fire a test notification to the current user
+```
+
+Push fires on `queue.drained` when all generation jobs complete.
+Requires VAPID keys in `config/production.yaml`
+(`notifications.vapid.public_key` / `notifications.vapid.private_key` /
+`notifications.vapid.subject`). When push is not configured, the
+subscribe endpoint returns 501 and the notification bell is hidden.
+
+Webhook channels are configured in `notifications.channels` as a list
+of `{ type: "webhook", url: "..." }` objects; they fire on the same
+`queue.drained` event.
+
+### Retention [shipped, step 10]
+
+```
+GET    /api/retention/policies       list all policies
+POST   /api/retention/policies       create { name, description?, ttl_days? }
+PATCH  /api/retention/policies/:id   update description or ttl_days
+GET    /api/retention/runs           sweep run history
+GET    /api/retention/events         audit log; ?application_id= to filter
+POST   /api/retention/sweep          manually trigger a sweep (async, responds immediately)
+```
+
+The nightly sweep runs at `0 2 * * *`. Per-application pin/policy
+endpoints live on the applications router (see §4 Applications above).
+Pre-seeded policies: `default` (7 days), `keep-30d` (30 days),
+`forever` (null — never purge).
 
 ### Server-Sent Events [shipped]
 
@@ -849,28 +945,25 @@ Tailwind + React Router.
 
 | Route | Status | Purpose |
 |---|---|---|
-| `/jobs` | shipped | Filtered listings (default view) |
-| `/jobs/all` | planned | All non-dismissed (for now, use date filter "All" on `/jobs`) |
+| `/jobs` | shipped | Filtered listings (default view); profile filter |
+| `/jobs/all` | not built | (use date filter "All" on `/jobs` for now) |
 | `/jobs/:id` | not built | Deep-linkable detail; currently a drawer on `/jobs` |
-| `/applications` | shipped (step 6/7) | Queue + generated docs |
-| `/applications/:id` | shipped (step 6) | Review + download + mark applied |
-| `/sources` | planned | Manage scrape sources (API-only for now) |
-| `/profiles` | planned (step 7.2) | Manage profiles (API-only initially, like sources) |
+| `/applications` | shipped | Queue + generated docs; version history panel; feedback regenerate |
 | `/resume` | shipped (step 5) | Master resume + writing samples |
-| `/settings` | planned | Model toggle, notifications, cron |
-
-**[7.2]** A profile selector / filter is added to `/jobs` (filter the
-list by profile). Full profile management UI is API-only initially,
-matching how `sources` shipped; a `/profiles` page can follow in step
-11 polish.
+| `/sources` | shipped (step 11) | Manage scrape sources + scrape-run history |
+| `/profiles` | shipped (step 11) | Manage profiles (keyword sets, resume version, writing samples) |
+| `/prompts` | shipped (step 11) | Manage saved system-prompt overrides |
+| `/settings` | not built | Model toggle, cron management |
 
 ### State management
 
 - React Query for server state. Query keys: `['jobs']`,
-  `['jobs', jobId]`, `['jobs', 'stats']`, and (7.2) `['profiles']`.
+  `['jobs', jobId]`, `['jobs', 'stats']`, `['profiles']`,
+  `['applications']`, `['applications', id, 'versions']`,
+  `['prompts']`, `['prompt', 'default']`.
   The SSE invalidator invalidates `['jobs']` on scrape events, which
   prefix-matches every jobs-related key.
-- Component state for local UI; no Zustand yet.
+- Component state for local UI; no Zustand.
 - No browser storage — explicitly avoided per artifact storage rules.
 
 ---
@@ -1099,21 +1192,24 @@ default profile.
 
 ---
 
-## 14. Retention Module [planned, step 10]
+## 14. Retention Module [shipped, step 10]
 
-Unchanged from v1 schema §14 for the application-level policy (TTL,
-pin/unpin on the `applications` retention columns).
+The nightly sweep (`0 2 * * *`) purges `ready` and `applied`
+applications whose `expires_at` has passed and which are not pinned.
+`expires_at` is set at generation time based on the application's
+resolved retention policy. The `forever` policy (null `ttl_days`)
+never sets an expiry.
 
-**Sequencing note re: generation versions (§19).** Retention (step 10)
-ships *before* regenerate-with-feedback (step 11), so the
-`application_versions` table doesn't exist when the retention sweep is
-first built. Version-level pruning is therefore deferred: step 11
-introduces versions with a `prunable` flag (non-current versions are
-marked prunable) and keeps them all; extending the step-10 sweep to
-also purge prunable, unpinned versions per policy lands with or just
-after step 11. The rule of thumb: keep the current version and any
-pinned version, prune the rest. No version pruning is built into step
-10 itself.
+Pin/unpin and policy-change endpoints sit on the applications router
+(see §4). Audit trail in `retention_events` and sweep history in
+`retention_runs` are accessible via `GET /api/retention/events` and
+`GET /api/retention/runs`.
+
+**Version-level pruning.** The `application_versions` table (§3)
+introduces a `prunable` flag — non-current versions after a
+regeneration are marked prunable. The current sweep does not yet
+purge versioned files; extending it to honour `prunable` + policy is
+the next incremental step.
 
 ---
 
@@ -1318,7 +1414,7 @@ later.
 
 ---
 
-## 17. Profiles [planned, step 7.2]
+## 17. Profiles [shipped, step 7.2]
 
 ### Problem
 
@@ -1418,16 +1514,17 @@ read-only. The single-default invariant is enforced on write (setting
 `is_default` clears it elsewhere for that user). `DELETE` refuses the
 default profile and any profile with sources still attached.
 
-### Out of scope for 7.2
+### What shipped in step 11
 
-- Profile management UI — API-only first, like `sources`. A `/profiles`
-  page can land in step 11.
-- Per-profile model/notification/retention policy — not needed yet;
-  adding later doesn't disturb the derivation.
+A `/profiles` management page lets users create, edit, and delete
+profiles through the UI (not just the API). `/sources` similarly gained
+a full management UI with scrape-run history inline. Per-profile
+model/notification/retention policy is still not on the profile — that
+remains deliberately global.
 
 ---
 
-## 18. Manual Job Entry [planned, step 7.3]
+## 18. Manual Job Entry [shipped, step 7.3]
 
 ### Why
 
@@ -1479,27 +1576,25 @@ POST   /api/jobs/manual              create a job by hand
 
 ---
 
-## 19. Regenerate with Feedback [planned, step 11]
+## 19. Regenerate with Feedback [shipped, step 11]
 
 ### Problem
 
-The current workflow is: generate a resume + cover letter from a
-listing, review, download, upload by hand. If generation *fails*, the
-BullMQ retry path covers it. But when it *succeeds* and the output
-isn't good enough, the only recourse is to delete the application and
-generate again from scratch — with no way to tell the model what to
-change. The friction isn't the delete-and-remake mechanics; it's the
-loss of the iterative, feedback-driven refinement available when
-tuning a document by hand. This feature closes that gap inside the
-review UI.
+The previous workflow was: generate, review, download, upload by hand.
+If generation *failed*, the BullMQ retry path covered it. But when it
+*succeeded* and the output wasn't good enough, the only recourse was
+to delete and regenerate from scratch with no steering. This feature
+closes that gap with an iterative feedback loop inside the review UI.
 
 ### Shape
 
-It extends the existing async regenerate path rather than adding a new
-surface. `POST /api/applications/:id/regenerate` gains an optional
-`feedback` string. On `/applications/:id`, a prompt box sits below the
-completed output; submitting it enqueues a regeneration (BullMQ, 202),
-SSE streams progress, and a new version appears when it lands. Strictly
+Extends the existing async regenerate path. `POST
+/api/applications/:id/regenerate` accepts optional `feedback` and
+`system_prompt` strings. On `/applications`, each completed application
+has a `RegenerateControl` panel that shows an optional feedback textarea
+and the system-prompt selector (same saved-prompt chooser as the
+generate dialog). Submitting enqueues a regeneration (BullMQ, 202), SSE
+streams progress, and a new version appears when it lands. Strictly
 pre-submission — no auto-submit, consistent with the project's
 human-in-the-loop rule.
 
@@ -1543,20 +1638,17 @@ endpoints keep working.
 
 ### Adapter change (additive)
 
-`GenerationRequest` gains optional `previousOutput` and `feedback`
-fields (see §5). The initial generation leaves them empty, so the step
-6/7 generation path is unchanged. The `AnthropicAdapter` folds them
-into the prompt; the future Ollama adapter (step 8) inherits the same
-contract.
+`GenerationRequest` gains optional `previousOutput`, `feedback`, and
+`systemPrompt` fields (see §5). The initial generation leaves them
+empty, so the pre-11 generation path is unchanged. Both the
+`AnthropicAdapter` and `OllamaAdapter` fold them into the prompt.
 
 ### Storage and pruning
 
-Versions accumulate under `storage/applications/{id}/v{n}/`. Pruning is
-retention's responsibility, not this feature's: non-current versions
-are marked `prunable`, and the step-10 retention sweep is extended to
-purge prunable, unpinned versions per policy (keep current + pinned).
-See §14 for the sequencing note (retention ships at step 10, versions
-at step 11).
+Versions accumulate under `storage/applications/{id}/v{n}/`. Non-current
+versions are marked `prunable` on the `application_versions` row.
+Extending the nightly retention sweep to also purge prunable, unpinned
+version files is the remaining open item (see §14).
 
 ### Out of scope
 
@@ -1572,6 +1664,21 @@ at step 11).
 
 ## Document changelog
 
+- **v2.4** (step 11 shipped; as-built sync) — Marked all sections
+  through step 11 as `[shipped]`. Updated the architecture note (§1)
+  and registered-modules table (§2) to reflect all nine modules.
+  Added `saved_prompts` table DDL (§3). Replaced retention tables
+  stub with full DDL (§3). Updated Applications API (§4) with full
+  current surface — prompts CRUD, versions, pin/policy, saved-prompt
+  prompt endpoint. Added Notifications API section (§4). Replaced
+  planned Retention API with shipped surface (§4). Updated Frontend
+  routes table (§8) to reflect all shipped pages including `/sources`,
+  `/profiles`, `/prompts`. Updated React Query key list (§8). Rewrote
+  §14 (Retention) to reflect shipped state and the prunable-versions
+  open item. Changed §17, §18, §19 headings from planned to shipped.
+  Updated §19 (Regenerate) to describe what actually shipped:
+  `RegenerateControl` UI, feedback + system_prompt on regenerate,
+  version history panel and rollback in the UI.
 - **v2.3** (step 11 regenerate-with-feedback planning) — Added §19
   (Regenerate with Feedback) and the `application_versions` table (§3).
   Extended the `applications` API with feedback on `regenerate` plus

@@ -69,4 +69,21 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 'applications_003_saved_prompts',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE saved_prompts (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    TEXT    NOT NULL,
+          name       TEXT    NOT NULL,
+          content    TEXT    NOT NULL,
+          created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(user_id, name)
+        );
+        CREATE INDEX idx_saved_prompts_user ON saved_prompts(user_id);
+      `);
+    },
+  },
 ];

@@ -5,6 +5,9 @@ import {
   type ApplicationWithJob,
   type ApplicationVersion,
   type RetentionPolicy,
+  type SavedPrompt,
+  type SavedPromptsListResponse,
+  type SavedPromptResponse,
 } from '../lib/api';
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -665,18 +668,89 @@ function RegenerateControl({
   isPending: boolean;
   label: string;
 }) {
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [promptExpanded, setPromptExpanded] = useState(false);
-  const [systemPrompt, setSystemPrompt] = useState<string | null>(null); // null = not loaded yet
+  const [defaultPrompt, setDefaultPrompt] = useState<string | null>(null);
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
   const [promptEdited, setPromptEdited] = useState(false);
+  const [promptSource, setPromptSource] = useState<string>('__default__');
+  const [savedList, setSavedList] = useState<SavedPrompt[] | null>(null);
+  const [showSaveAs, setShowSaveAs] = useState(false);
+  const [saveAsName, setSaveAsName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   function handleExpandPrompt() {
     setPromptExpanded(true);
-    if (systemPrompt === null) {
+    if (defaultPrompt === null) {
       api.get<{ prompt: string }>('/api/applications/prompt').then((r) => {
+        setDefaultPrompt(r.prompt);
         setSystemPrompt(r.prompt);
       });
+    }
+    if (savedList === null) {
+      api.get<SavedPromptsListResponse>('/api/applications/prompts').then((r) => {
+        setSavedList(r.prompts);
+      });
+    }
+  }
+
+  function handleSourceChange(value: string) {
+    setPromptSource(value);
+    if (value === '__default__') {
+      setSystemPrompt(defaultPrompt);
+      setPromptEdited(false);
+      setShowSaveAs(false);
+      setSaveAsName('');
+      setSaveError(null);
+    } else {
+      const found = savedList?.find((p) => p.id === Number(value));
+      if (found) {
+        setSystemPrompt(found.content);
+        setPromptEdited(true);
+      }
+    }
+  }
+
+  function handleReset() {
+    setSystemPrompt(defaultPrompt);
+    setPromptEdited(false);
+    setPromptSource('__default__');
+    setShowSaveAs(false);
+    setSaveAsName('');
+    setSaveError(null);
+  }
+
+  async function handleSave() {
+    if (!saveAsName.trim() || !systemPrompt) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const result = await api.post<SavedPromptResponse>('/api/applications/prompts', {
+        name: saveAsName.trim(),
+        content: systemPrompt,
+      });
+      const newPrompt = result.prompt;
+      setSavedList((prev) =>
+        prev
+          ? [...prev, newPrompt].sort((a, b) => a.name.localeCompare(b.name))
+          : [newPrompt],
+      );
+      qc.invalidateQueries({ queryKey: ['prompts'] });
+      setPromptSource(String(newPrompt.id));
+      setShowSaveAs(false);
+      setSaveAsName('');
+    } catch (err: unknown) {
+      const apiErr = err as { status?: number };
+      setSaveError(
+        apiErr.status === 409
+          ? `"${saveAsName.trim()}" already exists — choose a different name.`
+          : 'Failed to save prompt.',
+      );
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -688,16 +762,28 @@ function RegenerateControl({
     setOpen(false);
     setFeedback('');
     setPromptExpanded(false);
+    setDefaultPrompt(null);
     setSystemPrompt(null);
     setPromptEdited(false);
+    setPromptSource('__default__');
+    setSavedList(null);
+    setShowSaveAs(false);
+    setSaveAsName('');
+    setSaveError(null);
   }
 
   function handleCancel() {
     setOpen(false);
     setFeedback('');
     setPromptExpanded(false);
+    setDefaultPrompt(null);
     setSystemPrompt(null);
     setPromptEdited(false);
+    setPromptSource('__default__');
+    setSavedList(null);
+    setShowSaveAs(false);
+    setSaveAsName('');
+    setSaveError(null);
   }
 
   if (!open) {
@@ -729,26 +815,112 @@ function RegenerateControl({
         Advanced {promptExpanded ? '▲' : '▼'} Edit system prompt
       </button>
       {promptExpanded && (
-        <div>
+        <div className="space-y-2">
+          {/* Saved prompt selector */}
+          {savedList !== null && (
+            <div>
+              <select
+                value={promptSource}
+                onChange={(e) => handleSourceChange(e.target.value)}
+                className="text-xs px-2 py-1 rounded bg-surface border border-surface text-muted w-full"
+              >
+                <option value="__default__">Default (built-in)</option>
+                {savedList.map((p) => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              {savedList.length === 0 && (
+                <p className="text-xs text-muted/60 mt-1">
+                  No saved prompts yet — edit below and click "Save as…" to reuse later.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Prompt textarea */}
           {systemPrompt === null ? (
             <p className="text-xs text-muted">Loading…</p>
           ) : (
-            <>
-              <textarea
-                value={systemPrompt}
-                onChange={(e) => { setSystemPrompt(e.target.value); setPromptEdited(true); }}
-                rows={8}
-                className="w-full text-xs px-2 py-1.5 rounded bg-surface border border-surface text-ink font-mono resize-y"
-              />
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => {
+                setSystemPrompt(e.target.value);
+                setPromptEdited(true);
+              }}
+              rows={8}
+              className="w-full text-xs px-2 py-1.5 rounded bg-surface border border-surface text-ink font-mono resize-y"
+            />
+          )}
+
+          {/* Reset / Save as */}
+          {systemPrompt !== null && (
+            <div className="flex items-center gap-3 flex-wrap">
               {promptEdited && (
                 <button
-                  onClick={() => { setPromptEdited(false); setSystemPrompt(null); handleExpandPrompt(); }}
-                  className="mt-1 text-xs text-muted hover:text-ink transition-colors"
+                  onClick={handleReset}
+                  className="text-xs text-muted hover:text-ink transition-colors"
                 >
                   Reset to default
                 </button>
               )}
-            </>
+              {promptEdited && !showSaveAs && (
+                <button
+                  onClick={() => {
+                    setShowSaveAs(true);
+                    setSaveError(null);
+                  }}
+                  className="text-xs text-muted hover:text-ink transition-colors"
+                >
+                  Save as…
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Save-as inline form */}
+          {showSaveAs && (
+            <div className="space-y-1">
+              <div className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  value={saveAsName}
+                  onChange={(e) => {
+                    setSaveAsName(e.target.value);
+                    setSaveError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSave();
+                    if (e.key === 'Escape') {
+                      setShowSaveAs(false);
+                      setSaveAsName('');
+                    }
+                  }}
+                  placeholder="Prompt name…"
+                  autoFocus
+                  className="text-xs px-2 py-1 rounded bg-surface border border-surface text-ink flex-1 min-w-0"
+                />
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !saveAsName.trim()}
+                  className="text-xs px-2.5 py-1 rounded bg-accent/20 text-accent hover:bg-accent/30 transition-colors disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSaveAs(false);
+                    setSaveAsName('');
+                    setSaveError(null);
+                  }}
+                  className="text-xs text-muted hover:text-ink transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+              {saveError && <p className="text-xs text-red-400">{saveError}</p>}
+            </div>
           )}
         </div>
       )}

@@ -312,6 +312,23 @@ export interface SystemPromptResponse {
   prompt: string;
 }
 
+export interface SavedPrompt {
+  id: number;
+  user_id: string;
+  name: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedPromptsListResponse {
+  prompts: SavedPrompt[];
+}
+
+export interface SavedPromptResponse {
+  prompt: SavedPrompt;
+}
+
 export interface ApplicationResponse {
   application: ApplicationWithJob;
 }

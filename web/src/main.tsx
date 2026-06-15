@@ -8,6 +8,7 @@ import { ResumePage } from './pages/ResumePage';
 import { ApplicationsPage } from './pages/ApplicationsPage';
 import { SourcesPage } from './pages/SourcesPage';
 import { ProfilesPage } from './pages/ProfilesPage';
+import { PromptsPage } from './pages/PromptsPage';
 import './index.css';
 
 /**
@@ -41,6 +42,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/applications" element={<ApplicationsPage />} />
             <Route path="/sources" element={<SourcesPage />} />
             <Route path="/profiles" element={<ProfilesPage />} />
+            <Route path="/prompts" element={<PromptsPage />} />
             {/* /jobs/all, /settings land in later steps */}
             <Route path="*" element={<Navigate to="/jobs" replace />} />
           </Route>

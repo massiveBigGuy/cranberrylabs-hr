@@ -65,6 +65,16 @@ export function App() {
             >
               Profiles
             </NavLink>
+            <NavLink
+              to="/prompts"
+              className={({ isActive }) =>
+                `transition-colors ${
+                  isActive ? 'text-ink' : 'text-muted hover:text-ink'
+                }`
+              }
+            >
+              Prompts
+            </NavLink>
           </nav>
           <NotificationBell />
         </div>
