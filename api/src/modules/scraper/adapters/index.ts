@@ -1,6 +1,9 @@
 import type { AppConfig } from '../../../config';
 import type { ScraperAdapter } from './types';
 import { createWorkdayAdapter } from './workday';
+import { createGreenhouseAdapter } from './greenhouse';
+import { createLeverAdapter } from './lever';
+import { createAshbyAdapter } from './ashby';
 
 /**
  * Adapter registry. Add a new platform by writing an adapter file and
@@ -10,8 +13,9 @@ import { createWorkdayAdapter } from './workday';
 export function buildAdapters(config: AppConfig): Record<string, ScraperAdapter> {
   return {
     workday: createWorkdayAdapter(config),
-    // greenhouse: createGreenhouseAdapter(config),  — future
-    // lever: createLeverAdapter(config),            — future
+    greenhouse: createGreenhouseAdapter(config),
+    lever: createLeverAdapter(config),
+    ashby: createAshbyAdapter(config),
   };
 }
 

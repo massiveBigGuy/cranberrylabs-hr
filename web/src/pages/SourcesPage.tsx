@@ -9,14 +9,51 @@ import {
   type ProfilesListResponse,
 } from '../lib/api';
 
+/** Platforms creatable from this form. 'icims'/'custom' aren't wired to an
+ *  adapter; 'manual' is a synthetic per-user source created lazily by the
+ *  server, not through this endpoint. */
+type CreatablePlatform = 'workday' | 'greenhouse' | 'lever' | 'ashby';
+
+const PLATFORM_FIELD_COPY: Record<
+  CreatablePlatform,
+  { formTitle: string; label: string; placeholder: string; help: string }
+> = {
+  workday: {
+    formTitle: 'Add Workday Source',
+    label: 'Workday Tenant URL',
+    placeholder: 'https://acme.wd1.myworkdayjobs.com/External',
+    help: 'Full URL from the browser address bar on the Workday careers page.',
+  },
+  greenhouse: {
+    formTitle: 'Add Greenhouse Source',
+    label: 'Board Token',
+    placeholder: 'stripe',
+    help: "The company slug from their board, e.g. boards.greenhouse.io/stripe.",
+  },
+  lever: {
+    formTitle: 'Add Lever Source',
+    label: 'Company Slug',
+    placeholder: 'stripe',
+    help: 'The company slug from their board, e.g. jobs.lever.co/stripe.',
+  },
+  ashby: {
+    formTitle: 'Add Ashby Source',
+    label: 'Company Slug',
+    placeholder: 'linear',
+    help: 'The company slug from their board, e.g. jobs.ashby.io/linear.',
+  },
+};
+
 export function SourcesPage() {
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [createForm, setCreateForm] = useState({
+    platform: 'workday' as CreatablePlatform,
     company_name: '',
     tenant_url: '',
     profile_id: '',
+    lever_eu: false,
   });
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -39,7 +76,7 @@ export function SourcesPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sources'] });
       setShowCreate(false);
-      setCreateForm({ company_name: '', tenant_url: '', profile_id: '' });
+      setCreateForm({ platform: 'workday', company_name: '', tenant_url: '', profile_id: '', lever_eu: false });
       setCreateError(null);
     },
     onError: (err: unknown) => {
@@ -68,10 +105,13 @@ export function SourcesPage() {
     e.preventDefault();
     const payload: Record<string, unknown> = {
       company_name: createForm.company_name,
-      platform: 'workday',
+      platform: createForm.platform,
       tenant_url: createForm.tenant_url,
     };
     if (createForm.profile_id) payload.profile_id = Number(createForm.profile_id);
+    if (createForm.platform === 'lever' && createForm.lever_eu) {
+      payload.search_params = { region: 'eu' };
+    }
     createSource.mutate(payload);
   }
 
@@ -101,19 +141,28 @@ export function SourcesPage() {
           onSubmit={handleCreate}
           className="mb-6 p-4 border border-surface rounded-lg bg-surface/40 space-y-3"
         >
-          <h2 className="text-sm font-medium text-ink">Add Workday Source</h2>
+          <h2 className="text-sm font-medium text-ink">
+            {PLATFORM_FIELD_COPY[createForm.platform].formTitle}
+          </h2>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-muted mb-1">Company Name *</label>
-              <input
-                required
-                value={createForm.company_name}
+              <label className="block text-xs text-muted mb-1">Platform *</label>
+              <select
+                value={createForm.platform}
                 onChange={(e) =>
-                  setCreateForm((f) => ({ ...f, company_name: e.target.value }))
+                  setCreateForm((f) => ({
+                    ...f,
+                    platform: e.target.value as CreatablePlatform,
+                    lever_eu: false,
+                  }))
                 }
                 className={inputCls}
-                placeholder="Acme Corp"
-              />
+              >
+                <option value="workday">Workday</option>
+                <option value="greenhouse">Greenhouse</option>
+                <option value="lever">Lever</option>
+                <option value="ashby">Ashby</option>
+              </select>
             </div>
             <div>
               <label className="block text-xs text-muted mb-1">Profile</label>
@@ -134,7 +183,21 @@ export function SourcesPage() {
             </div>
           </div>
           <div>
-            <label className="block text-xs text-muted mb-1">Workday Tenant URL *</label>
+            <label className="block text-xs text-muted mb-1">Company Name *</label>
+            <input
+              required
+              value={createForm.company_name}
+              onChange={(e) =>
+                setCreateForm((f) => ({ ...f, company_name: e.target.value }))
+              }
+              className={inputCls}
+              placeholder="Acme Corp"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">
+              {PLATFORM_FIELD_COPY[createForm.platform].label} *
+            </label>
             <input
               required
               value={createForm.tenant_url}
@@ -142,12 +205,24 @@ export function SourcesPage() {
                 setCreateForm((f) => ({ ...f, tenant_url: e.target.value }))
               }
               className={inputCls}
-              placeholder="https://acme.wd1.myworkdayjobs.com/External"
+              placeholder={PLATFORM_FIELD_COPY[createForm.platform].placeholder}
             />
             <p className="text-xs text-muted mt-1">
-              Full URL from the browser address bar on the Workday careers page.
+              {PLATFORM_FIELD_COPY[createForm.platform].help}
             </p>
           </div>
+          {createForm.platform === 'lever' && (
+            <label className="flex items-center gap-2 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={createForm.lever_eu}
+                onChange={(e) =>
+                  setCreateForm((f) => ({ ...f, lever_eu: e.target.checked }))
+                }
+              />
+              EU instance (api.eu.lever.co)
+            </label>
+          )}
           {createError && <p className="text-xs text-red-400">{createError}</p>}
           <div className="flex justify-end">
             <button
@@ -163,8 +238,8 @@ export function SourcesPage() {
 
       {sources.length === 0 ? (
         <p className="text-sm text-muted">
-          No sources yet. Add a Workday source above to start scraping, or add jobs
-          manually from the Jobs page.
+          No sources yet. Add a Workday, Greenhouse, Lever, or Ashby source
+          above to start scraping, or add jobs manually from the Jobs page.
         </p>
       ) : (
         <div className="space-y-2">

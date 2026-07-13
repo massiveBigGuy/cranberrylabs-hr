@@ -10,7 +10,7 @@ behind Caddy + Authelia. Separate code, separate database, and
 separate Redis from `cranberrylabs-api` and `cranberrylabs-web`. The
 existing site links to it but shares nothing with it.
 
-## Current state — update 3 patch 1 complete
+## Current state — update 3 patch 2 complete
 
 The full pipeline is live: discover → fit-score → generate → review →
 iterate with feedback → submit (by hand). All nine modules are
@@ -26,16 +26,27 @@ through Authelia you have access to all pages described below.
 
 ### What works
 
-- **Sources management** — Workday tenant URLs registered and managed
-  from `/sources`; each can be enabled, disabled, manually triggered,
-  and its scrape-run history inspected. Each source belongs to a
-  profile, which is how jobs inherit their profile.
-- **Two-phase scraping** — a queued listing pass discovers postings
-  via Workday's JSON API; an hourly cron sweep fetches each posting's
-  full description.
+- **Sources management** — Workday, Greenhouse, Lever, and Ashby
+  sources registered and managed from `/sources` via a platform
+  selector; each can be enabled, disabled, manually triggered, and its
+  scrape-run history inspected. Each source belongs to a profile, which
+  is how jobs inherit their profile.
+- **Multi-ATS scraping** — four adapters behind one interface
+  (`ScraperAdapter`). Workday and Greenhouse are two-phase: a queued
+  listing pass discovers postings, then an hourly cron sweep fetches
+  each posting's full description. Lever and Ashby are one-phase: the
+  listing response already includes the full description, so those
+  jobs are ready immediately with no sweep step.
 - **Detail-sweep give-up** — jobs the sweep can't fetch after 5
   consecutive failures are flipped to `detail_fetch_status = 'gave_up'`
   and excluded from future runs.
+- **Cross-source duplicate detection** — the same posting discovered
+  through two different ATS sources (an employer migrating platforms
+  mid-search) is flipped to `status = 'duplicate'` once both copies
+  have a computed `description_hash`. Runs from the detail sweep for
+  two-phase adapters (Workday, Greenhouse) and at insert time for
+  one-phase adapters (Lever, Ashby), which never pass through the
+  sweep.
 - **Jobs API + UI** — `/jobs` with status, date, source, profile, tag,
   fit, and search filters; dual "X of Y jobs" count; collapsible
   "Database breakdown" stats panel; detail drawer with status/dismiss/
@@ -155,6 +166,14 @@ through Authelia you have access to all pages described below.
   rollback), and **saved system prompts** (named reusable prompt
   overrides managed at `/prompts`, selectable in generate + regenerate
   dialogs). See §19.
+- [x] **Step 12 — ATS adapters: Greenhouse, Lever, Ashby.** Three new
+  scraper adapters alongside Workday, raising ATS coverage from ~32%
+  to ~67% (design reference: `docs/update-1.md`). Greenhouse is
+  two-phase like Workday; Lever and Ashby are one-phase (full
+  description in the listing response). Platform selector added to
+  `/sources`. Closed a gap in the cross-source dedup patch where
+  one-phase jobs never reached the sweep-side duplicate check — see
+  `docs/schema-v2.md` §3.
 
 
 ## Layout
@@ -165,7 +184,8 @@ cranberrylabs-hr/
 │   ├── src/
 │   │   ├── modules/
 │   │   │   ├── sources/          source CRUD, scrape trigger
-│   │   │   ├── scraper/          Workday adapter, queue worker, sweep
+│   │   │   ├── scraper/          Workday/Greenhouse/Lever/Ashby adapters,
+│   │   │   │                     queue worker, detail sweep
 │   │   │   ├── jobs/             list, detail, status, tags, stats, fit-scorer
 │   │   │   ├── resume/           master resume + writing samples
 │   │   │   ├── applications/     generation queue, doc storage, versions,

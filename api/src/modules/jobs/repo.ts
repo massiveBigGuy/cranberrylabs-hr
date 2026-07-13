@@ -33,7 +33,8 @@ export type JobStatus =
   | 'generating'
   | 'ready'
   | 'applied'
-  | 'archived';
+  | 'archived'
+  | 'duplicate';
 
 const ALLOWED_STATUSES: readonly JobStatus[] = [
   'new',
@@ -44,6 +45,7 @@ const ALLOWED_STATUSES: readonly JobStatus[] = [
   'ready',
   'applied',
   'archived',
+  'duplicate',
 ];
 
 export function isJobStatus(s: unknown): s is JobStatus {

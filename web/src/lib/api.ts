@@ -141,7 +141,7 @@ export interface JobDetailResponse {
 
 // ---------- Sources module ----------
 
-export type SourcePlatform = 'workday' | 'greenhouse' | 'lever' | 'icims' | 'custom' | 'manual';
+export type SourcePlatform = 'workday' | 'greenhouse' | 'lever' | 'ashby' | 'icims' | 'custom' | 'manual';
 export type SourceStatus = 'ok' | 'blocked' | 'error' | null;
 
 export interface Source {

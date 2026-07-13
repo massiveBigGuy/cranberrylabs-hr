@@ -77,7 +77,23 @@ export class JobsRepo {
           j.salary_max,
           j.salary_currency,
         );
-        if (info.changes > 0) inserted++;
+        if (info.changes > 0) {
+          inserted++;
+
+          // Cross-source dedup for one-phase adapters (Lever, Ashby): their
+          // rows already carry a real description_hash at insert time, so
+          // they never have an empty description and never enter
+          // detail-sweep.ts's candidate query — the dedup check that lives
+          // there would never run for them. Run the same check here for any
+          // row that already has a hash; two-phase rows (Workday,
+          // Greenhouse) still insert with description_hash = '' and are
+          // deduped later by the sweep as before.
+          if (j.description_hash) {
+            const newId = Number(info.lastInsertRowid);
+            const dup = this.findCrossSourceDuplicate(userId, j.company, j.description_hash, newId);
+            if (dup) this.markDuplicateIfNew(newId);
+          }
+        }
       }
     });
     tx(jobs);
@@ -136,6 +152,42 @@ export class JobsRepo {
       .prepare('SELECT COUNT(*) AS n FROM jobs WHERE source_id = ?')
       .get(sourceId) as { n: number };
     return row.n;
+  }
+
+  /**
+   * Look for another job (any source) belonging to the same user with the
+   * same company and description_hash. Only meaningful once a real hash has
+   * been computed (phase 2) — description_hash is '' for every job at
+   * insert time, so callers must not invoke this with an empty hash.
+   */
+  findCrossSourceDuplicate(
+    userId: string,
+    company: string,
+    descriptionHash: string,
+    excludeJobId: number,
+  ): { id: number } | undefined {
+    return this.db
+      .prepare(
+        `SELECT id FROM jobs
+         WHERE user_id = :userId
+           AND company = :company
+           AND description_hash = :descriptionHash
+           AND id != :excludeJobId
+         LIMIT 1`,
+      )
+      .get({ userId, company, descriptionHash, excludeJobId }) as { id: number } | undefined;
+  }
+
+  /**
+   * Flip a job to 'duplicate' status. Guarded on status = 'new' so we never
+   * clobber a status the user already set (reviewing/dismissed/etc.) by
+   * hand before the detail sweep got to it.
+   */
+  markDuplicateIfNew(id: number): boolean {
+    const info = this.db
+      .prepare(`UPDATE jobs SET status = 'duplicate' WHERE id = ? AND status = 'new'`)
+      .run(id);
+    return info.changes > 0;
   }
 
   /**

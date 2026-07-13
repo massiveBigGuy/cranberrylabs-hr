@@ -114,6 +114,26 @@ export async function runDetailSweep(
           detail.description_hash,
           detail.hiring_manager ?? null,
         );
+
+        // Cross-source dedup: description_hash only exists from this point
+        // on, so this is the earliest place duplicates posted under a
+        // second ATS source can be detected.
+        if (detail.description_hash) {
+          const dup = jobs.findCrossSourceDuplicate(
+            job.user_id,
+            job.company,
+            detail.description_hash,
+            job.id,
+          );
+          if (dup && jobs.markDuplicateIfNew(job.id)) {
+            ctx.logger.info('detail sweep: cross-source duplicate detected', {
+              job_id: job.id,
+              duplicate_of: dup.id,
+              company: job.company,
+            });
+          }
+        }
+
         const fit = computeFitScore(
           { title: job.title, description: detail.description },
           profileSignals,

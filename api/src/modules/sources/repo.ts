@@ -1,6 +1,6 @@
 import type { DB } from '../../services/db';
 
-export type Platform = 'workday' | 'greenhouse' | 'lever' | 'icims' | 'custom' | 'manual';
+export type Platform = 'workday' | 'greenhouse' | 'lever' | 'ashby' | 'icims' | 'custom' | 'manual';
 export type SourceStatus = 'ok' | 'blocked' | 'error' | null;
 
 export interface SourceRow {

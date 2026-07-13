@@ -200,7 +200,7 @@ function validateNewSource(input: Partial<ValidatedInput>): ValidationResult {
     return { ok: false, error: 'platform is required' };
   }
   const platform = input.platform.toLowerCase() as Platform;
-  if (!['workday', 'greenhouse', 'lever', 'icims', 'custom'].includes(platform)) {
+  if (!['workday', 'greenhouse', 'lever', 'ashby', 'icims', 'custom'].includes(platform)) {
     return { ok: false, error: `unsupported platform '${input.platform}'` };
   }
   if (typeof input.tenant_url !== 'string' || !input.tenant_url.trim()) {

@@ -44,6 +44,7 @@ Build-order progress:
 - [x] Step 9 — Notifications (browser push + webhooks)
 - [x] Step 10 — Retention (nightly sweep, pin/unpin, named policies)
 - [x] Step 11 — Polish (sources + profiles UI, scrape-run history, regenerate-with-feedback, version history, saved system prompts)
+- [x] Step 12 — ATS adapters: Greenhouse, Lever, Ashby
 
 ---
 
@@ -256,11 +257,43 @@ CREATE INDEX idx_jobs_detail_fetch ON jobs(detail_fetch_status);
 ```
 
 Status values: `'new' | 'reviewing' | 'dismissed' | 'queued' |
-'generating' | 'ready' | 'applied' | 'archived'`.
+'generating' | 'ready' | 'applied' | 'archived' | 'duplicate'`.
+`'duplicate'` is excluded from the default `/api/jobs` listing the
+same way `'dismissed'`/`'archived'` are — it only shows up with
+`?status=all` or an explicit `?status=duplicate` filter.
 
 Detail-fetch status values: `'pending' | 'ok' | 'gave_up'`. A job
 flips to `'gave_up'` after 5 consecutive failed detail fetches and
 is excluded from future sweeps.
+
+### Cross-source duplicate detection
+
+`jobs.description_hash` is `''` at insert time for **two-phase**
+adapters (Workday, Greenhouse) — the real sha256 hash isn't known
+until the phase-2 detail sweep fetches the full description. So
+per-source dedup at insert uses `UNIQUE(source_id, external_id)`, but
+cross-source dedup (the same posting discovered through two different
+ATS sources) can only be checked once the hash exists: `detail-sweep.ts`,
+right after `JobsRepo.updateDescription`, looks for another job for the
+same `user_id` with the same `company` and `description_hash` and,
+if found, flips this job to `status = 'duplicate'`
+(`JobsRepo.findCrossSourceDuplicate` / `markDuplicateIfNew`). The
+flip is guarded on `status = 'new'` so it never overwrites a status
+the user already set by hand.
+
+**[step 12] Insert-time dedup for one-phase adapters.** Lever and Ashby
+(§7) return the full description in the listing response, so their
+rows get a real `description_hash` at insert time and are never
+`description = ''` — they structurally never reach `detail-sweep.ts`'s
+candidate query, so the sweep-side dedup check above never runs for
+them. `scraper/repo-jobs.ts upsertMany` runs the same
+`findCrossSourceDuplicate` / `markDuplicateIfNew` pair immediately
+after any successful insert whose `description_hash` is already
+non-empty, closing that gap. The two checks are symmetric and don't
+overlap: whichever of a duplicate pair gets its hash computed *second*
+(at insert time for a one-phase job, or at sweep time for a two-phase
+job) is the one that flips to `'duplicate'`, regardless of which
+platform or which order the sources were scraped in.
 
 ### `profiles` — per-role-type bundle [shipped, step 7.2]
 
@@ -840,15 +873,41 @@ Unchanged from v1 schema §6. Content is stored as a JSON string in
 
 ## 7. Scraper Layer Detail [shipped, with revisions]
 
-### Adapter pattern [shipped]
+### Adapter pattern [shipped, extended step 12]
 
 Each platform has its own adapter under
-`api/src/modules/scraper/adapters/`. Currently only Workday is
-implemented. The adapter interface in
-`scraper/adapters/types.ts` defines `probe`, `scrape` (listing),
+`api/src/modules/scraper/adapters/`. Four are implemented: Workday,
+Greenhouse, Lever, Ashby (`docs/update-1.md` is the design reference
+for the latter three). The adapter interface in
+`scraper/adapters/types.ts` defines `probe`, `scrapeListings`,
 and `fetchDetail` (per-job description). "scraper" is a deliberately
 loose umbrella: additional ATS adapters (and the manual-entry path in
 step 7.3) register under the same module.
+
+**Two-phase vs one-phase.** Workday and Greenhouse are two-phase — the
+listing endpoint returns abbreviated records, so `fetchDetail` does
+real work and the row passes through the detail sweep. Lever and Ashby
+are one-phase — the listing response already includes the full
+description, so `description` / `description_hash` are populated at
+insert time, `detail_fetch_status` is `'ok'` immediately, and the row
+never reaches the sweep. Their `fetchDetail` implementations exist only
+to satisfy the interface (a defensive re-fetch-and-match-by-URL) and
+are not expected to run in normal operation. This split is also why the
+cross-source dedup check had to grow an insert-time counterpart — see
+§3.
+
+Shared helpers live in `scraper/adapters/util.ts`
+(`hashDescription`, `HttpError`) and `scraper/adapters/workday.ts`
+(`htmlToText`, reused by Greenhouse and as an HTML fallback for
+Lever/Ashby) rather than being duplicated per adapter.
+
+Platform registration for a new adapter touches four places: the
+adapter file itself, `scraper/adapters/index.ts` (`buildAdapters`),
+the `Platform` union in `sources/repo.ts`, and the allowlist in
+`sources/router.ts`'s `validateNewSource`. The frontend mirrors the
+union in `web/src/lib/api.ts` (`SourcePlatform`) and offers the
+creatable platforms from a select on `/sources`
+(`web/src/pages/SourcesPage.tsx`).
 
 ### Two-phase scrape [shipped, revised from v1]
 
@@ -889,6 +948,26 @@ Workday's URL pattern is
 string including reserved-looking ones. CIBC's site is literally
 `search`. The adapter treats the last path segment as the site name
 verbatim — don't add special-casing for that.
+
+### Greenhouse job-id recovery — known correctness point [shipped, step 12]
+
+`ScraperAdapter.fetchDetail` only receives the stored public URL, not
+the job's `external_id`, so the Greenhouse adapter recovers the
+numeric job id it needs for the detail endpoint by taking the trailing
+numeric path segment off `absolute_url` (e.g. `.../jobs/1234567` →
+`1234567`). This holds for both `boards.greenhouse.io/{token}` and
+companies that front Greenhouse with a custom career-site domain,
+since the numeric id is always the final path segment either way.
+Don't special-case the host.
+
+### Lever EU region [shipped, step 12]
+
+Lever tenants with EU data residency serve from `api.eu.lever.co`
+instead of `api.lever.co`. Since `sources.tenant_url` holds just the
+company slug for these adapters (not a full URL), the region is
+carried in the existing `sources.search_params` JSON column as
+`{ "region": "eu" }` rather than parsed out of anything — no schema
+change. Every other adapter currently leaves `search_params` unused.
 
 ### Cron schedule [shipped]
 
@@ -1070,11 +1149,17 @@ Annotated with current status:
     channel. Fires on `queue.drained`.
 14. [x] **Step 10 — Retention module.** Sweep cron, pin/unpin
     endpoints, expiry badges. Default 7-day policy.
-15. [ ] **Step 11 — Polish.** Scrape_runs admin view, `/profiles` and
+15. [x] **Step 11 — Polish.** Scrape_runs admin view, `/profiles` and
     `/sources` management UI, and **regenerate-with-feedback** — an
     iterative tuning loop on a completed application (feedback box on
-    `/applications/:id`, versioned outputs, rollback). See §19. Plus
-    anything left.
+    `/applications/:id`, versioned outputs, rollback). See §19.
+16. [x] **Step 12 — ATS adapters: Greenhouse, Lever, Ashby.** Three new
+    one-/two-phase adapters alongside Workday (design reference:
+    `docs/update-1.md`), platform registration across
+    `sources/repo.ts` + `sources/router.ts` + `web/src/lib/api.ts`, a
+    platform selector on `/sources`, and an insert-time cross-source
+    dedup check for the two one-phase adapters (Lever, Ashby) that
+    never reach the detail sweep. See §3 and §7.
 
 ---
 
@@ -1664,6 +1749,19 @@ version files is the remaining open item (see §14).
 
 ## Document changelog
 
+- **v2.5** (step 12 shipped — ATS adapters) — Added Greenhouse, Lever,
+  and Ashby adapters alongside Workday, per the design reference in
+  `docs/update-1.md`. Extended §7 "Adapter pattern" with the
+  one-phase/two-phase split and the shared `util.ts`/`htmlToText`
+  helpers; added the Greenhouse job-id-recovery and Lever EU-region
+  correctness-point subsections. Documented the insert-time
+  cross-source dedup fix in §3 (`upsertMany` now runs the same
+  duplicate check `detail-sweep.ts` uses, for any row that already has
+  a `description_hash` at insert time — closes a gap where Lever/Ashby
+  jobs, which never have an empty description, never reached the
+  sweep-side check). Added build-order step 12 and corrected step 11's
+  checkbox (previously still marked unshipped despite the rest of the
+  document describing it as shipped).
 - **v2.4** (step 11 shipped; as-built sync) — Marked all sections
   through step 11 as `[shipped]`. Updated the architecture note (§1)
   and registered-modules table (§2) to reflect all nine modules.
