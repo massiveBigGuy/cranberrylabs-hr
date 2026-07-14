@@ -16,6 +16,7 @@ const STATUS_STYLES: Record<Job['status'], string> = {
   ready: 'bg-green-500/20 text-green-300',
   applied: 'bg-accent/30 text-ink',
   archived: 'bg-surface text-muted',
+  duplicate: 'bg-surface text-muted line-through',
 };
 
 export function JobRow({ job, onOpen, selected, onToggle }: JobRowProps) {

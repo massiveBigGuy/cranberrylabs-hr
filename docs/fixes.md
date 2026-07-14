@@ -1,4 +1,5 @@
-# Code Review Fixes — 2026-06-12
+# Code Review Fixes and Lessons Learned
+# Code Review Fixes from — 2026-06-12
 
 Findings from a post-Step-11 codebase audit. Four issues were confirmed and fixed;
 two additional findings (generation_notes schema debt, ORDER BY tiebreaker) were
@@ -157,3 +158,43 @@ Redis is on `cranberrylabs-hr_default`, a private Docker network. No host ports 
 ### CSRF — mitigated by browser SOP
 
 The SPA is served from the same origin as the API. State-changing requests require the Authelia session cookie, which the browser attaches automatically only to same-origin requests (Lax/Strict). A cross-origin form POST cannot carry the cookie. No CSRF protection needed beyond what the browser already provides.
+
+---
+
+# Build Fixes — 2026-07-14
+
+## Fix 1 — Missing `duplicate` case broke the `web-build` Docker stage
+
+**File:** `web/src/components/JobRow.tsx`
+
+`docker compose up -d --build` failed at `RUN npm run build` in the `web-build`
+stage with:
+
+```
+src/components/JobRow.tsx(10,7): error TS2741: Property 'duplicate' is missing
+in type '{ new: string; reviewing: string; ...; archived: string; }' but
+required in type 'Record<JobStatus, string>'.
+```
+
+`JobStatus` is declared independently in two places — `api/src/modules/jobs/repo.ts`
+(backend) and `web/src/lib/api.ts` (frontend) — since this repo has no shared
+package between `api/` and `web/`. `'duplicate'` was added to the backend union
+for the cross-source-dedup feature, then later added to the frontend union too
+(to keep the two in sync), but that second edit only touched the type
+declaration. `JobRow.tsx`'s `STATUS_STYLES: Record<Job['status'], string>` badge
+map exhaustively enumerates every status to a CSS class, so it broke the moment
+the union gained a member it didn't account for — exactly what `Record<K, V>`
+is supposed to catch (better a loud build failure than a badge silently
+rendering `undefined` classes for duplicate jobs at runtime).
+
+**Change:** Added `duplicate: 'bg-surface text-muted line-through'` (same
+style as `dismissed` — both are "not worth looking at" states). whenever a union type used
+on both sides of the `api/`↔`web/` split gains a new member, updating the type
+declaration itself is not the whole fix. Grep both sides for every exhaustive
+consumer of that union — `Record<TheUnion, ...>` object literals are the most
+common shape in this codebase, but a `switch` with no `default` case would have
+the same problem without erroring. This is the second time this exact class of
+bug has surfaced (`'duplicate'` was added to the backend status union, then
+missed on a `Record` on the frontend); worth a `grep -rn "Record<.*Status"` (or
+similarly for future ATS-`Platform`/other shared unions) as a matter of course
+after touching any type shared informally across the split.
