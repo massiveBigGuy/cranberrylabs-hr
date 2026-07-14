@@ -57,4 +57,19 @@ export const migrations: Migration[] = [
       db.exec(`ALTER TABLE jobs ADD COLUMN user_id TEXT NOT NULL DEFAULT '';`);
     },
   },
+  {
+    id: 'scraper_005_location_parsed',
+    up: (db) => {
+      // Structured geographic columns parsed from the free-text `location`
+      // column by scraper/location-parser.ts. All nullable — null means the
+      // parser couldn't confidently resolve that level of detail (or the
+      // job is remote, where geographic parsing is skipped entirely).
+      db.exec(`
+        ALTER TABLE jobs ADD COLUMN location_country TEXT;
+        ALTER TABLE jobs ADD COLUMN location_state   TEXT;
+        ALTER TABLE jobs ADD COLUMN location_city    TEXT;
+        CREATE INDEX idx_jobs_location ON jobs(location_country, location_state);
+      `);
+    },
+  },
 ];

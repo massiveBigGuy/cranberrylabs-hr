@@ -1,5 +1,6 @@
 import type { DB } from '../../services/db';
 import type { NormalizedJob } from './adapters/types';
+import { parseLocation } from './location-parser';
 
 export interface JobRow {
   id: number;
@@ -24,6 +25,9 @@ export interface JobRow {
   fit_reasons: string | null;
   status: string;
   dismissed_reason: string | null;
+  location_country: string | null;
+  location_state: string | null;
+  location_city: string | null;
 }
 
 export interface UpsertResult {
@@ -49,10 +53,12 @@ export class JobsRepo {
       INSERT INTO jobs (
         source_id, user_id, external_id, title, company, location, remote_type,
         url, description, description_hash, posted_date,
-        salary_min, salary_max, salary_currency
+        salary_min, salary_max, salary_currency,
+        location_country, location_state, location_city
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
+        ?, ?, ?,
         ?, ?, ?
       )
       ON CONFLICT(source_id, external_id) DO NOTHING
@@ -61,6 +67,7 @@ export class JobsRepo {
     let inserted = 0;
     const tx = this.db.transaction((items: NormalizedJob[]) => {
       for (const j of items) {
+        const parsedLocation = parseLocation(j.location, j.remote_type);
         const info = stmt.run(
           sourceId,
           userId,
@@ -76,6 +83,9 @@ export class JobsRepo {
           j.salary_min,
           j.salary_max,
           j.salary_currency,
+          parsedLocation.country,
+          parsedLocation.state,
+          parsedLocation.city,
         );
         if (info.changes > 0) {
           inserted++;

@@ -102,6 +102,10 @@ export function buildProfilesRouter(ctx: AppContext): Router {
       excluded_keywords?: string[] | null;
       resume_version_id?: number | null;
       is_default?: boolean;
+      allowed_countries?: string[] | null;
+      allowed_states?: string[] | null;
+      include_remote?: boolean;
+      include_null_location?: boolean;
     } = {};
 
     if (body.name !== undefined) {
@@ -127,6 +131,22 @@ export function buildProfilesRouter(ctx: AppContext): Router {
     }
     if (body.is_default === true) {
       patch.is_default = true;
+    }
+    if (body.allowed_countries !== undefined) {
+      patch.allowed_countries = Array.isArray(body.allowed_countries)
+        ? (body.allowed_countries as unknown[]).filter((c): c is string => typeof c === 'string')
+        : null;
+    }
+    if (body.allowed_states !== undefined) {
+      patch.allowed_states = Array.isArray(body.allowed_states)
+        ? (body.allowed_states as unknown[]).filter((s): s is string => typeof s === 'string')
+        : null;
+    }
+    if (typeof body.include_remote === 'boolean') {
+      patch.include_remote = body.include_remote;
+    }
+    if (typeof body.include_null_location === 'boolean') {
+      patch.include_null_location = body.include_null_location;
     }
 
     try {

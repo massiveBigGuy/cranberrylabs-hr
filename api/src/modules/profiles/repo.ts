@@ -10,6 +10,10 @@ export interface ProfileRow {
   is_default: number;                // 0 | 1
   created_at: string;
   updated_at: string;
+  allowed_countries: string | null;      // JSON string[]; null = no restriction
+  allowed_states: string | null;         // JSON string[]; null = no restriction
+  include_remote: number;                // 0 | 1
+  include_null_location: number;         // 0 | 1
 }
 
 export interface NewProfileInput {
@@ -25,6 +29,10 @@ export interface ProfileUpdate {
   excluded_keywords?: string[] | null;
   resume_version_id?: number | null;
   is_default?: boolean;
+  allowed_countries?: string[] | null;
+  allowed_states?: string[] | null;
+  include_remote?: boolean;
+  include_null_location?: boolean;
 }
 
 export class ProfilesRepo {
@@ -110,6 +118,22 @@ export class ProfilesRepo {
       if (patch.resume_version_id !== undefined) {
         fields.push('resume_version_id = ?');
         values.push(patch.resume_version_id ?? null);
+      }
+      if (patch.allowed_countries !== undefined) {
+        fields.push('allowed_countries = ?');
+        values.push(patch.allowed_countries != null ? JSON.stringify(patch.allowed_countries) : null);
+      }
+      if (patch.allowed_states !== undefined) {
+        fields.push('allowed_states = ?');
+        values.push(patch.allowed_states != null ? JSON.stringify(patch.allowed_states) : null);
+      }
+      if (patch.include_remote !== undefined) {
+        fields.push('include_remote = ?');
+        values.push(patch.include_remote ? 1 : 0);
+      }
+      if (patch.include_null_location !== undefined) {
+        fields.push('include_null_location = ?');
+        values.push(patch.include_null_location ? 1 : 0);
       }
 
       if (fields.length > 0) {

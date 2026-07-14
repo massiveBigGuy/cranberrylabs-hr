@@ -23,6 +23,9 @@ export interface JobRow {
   fit_reasons: string | null;
   status: JobStatus;
   dismissed_reason: string | null;
+  location_country: string | null;
+  location_state: string | null;
+  location_city: string | null;
 }
 
 export type JobStatus =
@@ -69,6 +72,13 @@ export interface ListJobsOptions {
     include?: string[];
     exclude?: string[];
   };
+  applyLocationFilter?: boolean;
+  locationFilter?: {
+    allowedCountries: string[] | null;
+    allowedStates: string[] | null;
+    includeRemote: boolean;
+    includeNullLocation: boolean;
+  };
 }
 
 export interface JobStats {
@@ -82,6 +92,9 @@ export interface JobStats {
     ok: number;
     gave_up: number;
   };
+  by_location_country: Record<string, number>;
+  location_remote_count: number;
+  location_null_count: number;
 }
 
 export interface ListJobsResult {
@@ -90,6 +103,62 @@ export interface ListJobsResult {
   total_unfiltered: number;
   offset: number;
   limit: number;
+}
+
+/**
+ * Builds the OR'd location-filter WHERE clause described in
+ * docs/location-filtering-patch3.md, pushing any params it needs into the
+ * shared `params` object (same binding idiom `list()` already uses for
+ * statuses/tagIds/keywords — no new mechanism).
+ *
+ * Note: `allowed_countries`/`allowed_states` distinguish `null` ("no
+ * restriction") from `[]` ("explicit empty selection — nothing passes").
+ * The UI never sends `[]` for "unrestricted"; only `null` means that, so
+ * this distinction has to be preserved rather than treating both the same.
+ */
+function buildLocationFilterSql(
+  filter: {
+    allowedCountries: string[] | null;
+    allowedStates: string[] | null;
+    includeRemote: boolean;
+    includeNullLocation: boolean;
+  },
+  params: Record<string, unknown>,
+): string {
+  params.loc_include_remote = filter.includeRemote ? 1 : 0;
+  params.loc_include_null = filter.includeNullLocation ? 1 : 0;
+
+  let countryClause = '1=1';
+  if (filter.allowedCountries !== null) {
+    if (filter.allowedCountries.length === 0) {
+      countryClause = '0=1';
+    } else {
+      const keys = filter.allowedCountries.map((_, i) => `:loc_country_${i}`);
+      filter.allowedCountries.forEach((c, i) => {
+        params[`loc_country_${i}`] = c;
+      });
+      countryClause = `location_country IN (${keys.join(',')})`;
+    }
+  }
+
+  let stateClause = '1=1';
+  if (filter.allowedStates !== null) {
+    if (filter.allowedStates.length === 0) {
+      stateClause = '0=1';
+    } else {
+      const keys = filter.allowedStates.map((_, i) => `:loc_state_${i}`);
+      filter.allowedStates.forEach((s, i) => {
+        params[`loc_state_${i}`] = s;
+      });
+      stateClause = `location_state IN (${keys.join(',')})`;
+    }
+  }
+
+  return `(
+    (remote_type = 'remote' AND :loc_include_remote = 1)
+    OR (location_country IS NULL AND :loc_include_null = 1)
+    OR (${countryClause} AND ${stateClause})
+  )`;
 }
 
 export class JobsRepo {
@@ -176,6 +245,10 @@ export class JobsRepo {
       }
     }
 
+    if (opts.applyLocationFilter && opts.locationFilter) {
+      where.push(buildLocationFilterSql(opts.locationFilter, params));
+    }
+
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const orderSql =
@@ -250,6 +323,33 @@ export class JobsRepo {
       .all() as Pick<JobRow, 'id' | 'title' | 'description'>[];
   }
 
+  /**
+   * Backfill candidates for location-parser.ts. Deliberately excludes
+   * remote jobs (remote_type = 'remote' already means all-null is correct,
+   * not unparsed) but includes onsite/hybrid/unset jobs whose location was
+   * never parsed. Jobs with genuinely unresolvable location text (e.g.
+   * "LATAM") match this query on every boot, not just once — acceptable,
+   * since parseLocation is cheap pure-string work, same rationale as the
+   * fit-score backfill above.
+   */
+  findNeedingLocationParse(): Pick<JobRow, 'id' | 'location' | 'remote_type'>[] {
+    return this.db
+      .prepare(
+        `SELECT id, location, remote_type FROM jobs
+         WHERE location_country IS NULL
+           AND remote_type IS NOT 'remote'`,
+      )
+      .all() as Pick<JobRow, 'id' | 'location' | 'remote_type'>[];
+  }
+
+  updateLocation(id: number, country: string | null, state: string | null, city: string | null): void {
+    this.db
+      .prepare(
+        'UPDATE jobs SET location_country = ?, location_state = ?, location_city = ? WHERE id = ?',
+      )
+      .run(country, state, city, id);
+  }
+
   insertManual(input: {
     source_id: number;
     external_id: string;
@@ -264,17 +364,22 @@ export class JobsRepo {
     fit_score: number | null;
     fit_reasons: string | null;
     user_id: string;
+    location_country: string | null;
+    location_state: string | null;
+    location_city: string | null;
   }): JobRow {
     return this.db
       .prepare(
         `INSERT INTO jobs (
           source_id, external_id, title, company, url, description, description_hash,
           location, remote_type, posted_date, fit_score, fit_reasons,
-          detail_fetch_status, user_id
+          detail_fetch_status, user_id,
+          location_country, location_state, location_city
         ) VALUES (
           :source_id, :external_id, :title, :company, :url, :description, :description_hash,
           :location, :remote_type, :posted_date, :fit_score, :fit_reasons,
-          'ok', :user_id
+          'ok', :user_id,
+          :location_country, :location_state, :location_city
         )
         RETURNING *`,
       )
@@ -373,6 +478,35 @@ export class JobsRepo {
       this.db.prepare(nonDismissedSql).get(...userParam) as { n: number }
     ).n;
 
+    // Location breakdown — unscoped by the location filter itself, same
+    // convention `by_status` already follows relative to the keyword
+    // filter. Drives the frontend's country picker: the keys of
+    // by_location_country are exactly the countries with jobs on file, so
+    // the panel only ever offers countries that actually appear.
+    const countryRows = this.db
+      .prepare(
+        `SELECT location_country as c, COUNT(*) as n FROM jobs
+         WHERE location_country IS NOT NULL ${userAndClause}
+         GROUP BY location_country`,
+      )
+      .all(...userParam) as { c: string; n: number }[];
+    const byLocationCountry: Record<string, number> = {};
+    for (const r of countryRows) byLocationCountry[r.c] = r.n;
+
+    const locationRemoteCount = (
+      this.db
+        .prepare(`SELECT COUNT(*) as n FROM jobs WHERE remote_type = 'remote' ${userAndClause}`)
+        .get(...userParam) as { n: number }
+    ).n;
+
+    const locationNullCount = (
+      this.db
+        .prepare(
+          `SELECT COUNT(*) as n FROM jobs WHERE location_country IS NULL AND remote_type IS NOT 'remote' ${userAndClause}`,
+        )
+        .get(...userParam) as { n: number }
+    ).n;
+
     return {
       total,
       by_status: byStatus,
@@ -380,6 +514,9 @@ export class JobsRepo {
       filtered_out_by_keywords: nonDismissed - passing,
       missing_description: missingDescription,
       detail_fetch: detailFetch,
+      by_location_country: byLocationCountry,
+      location_remote_count: locationRemoteCount,
+      location_null_count: locationNullCount,
     };
   }
 }

@@ -16,6 +16,9 @@ interface JobStats {
     ok: number;
     gave_up: number;
   };
+  by_location_country: Record<string, number>;
+  location_remote_count: number;
+  location_null_count: number;
 }
 
 /**
@@ -67,9 +70,12 @@ function StatsBody({ stats }: { stats: JobStats }) {
   const statusEntries = Object.entries(stats.by_status).sort(
     (a, b) => b[1] - a[1],
   );
+  const countryEntries = Object.entries(stats.by_location_country).sort(
+    (a, b) => b[1] - a[1],
+  );
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
       {/* Totals */}
       <div>
         <h3 className="text-xs uppercase tracking-wide text-muted mb-2">
@@ -124,6 +130,25 @@ function StatsBody({ stats }: { stats: JobStats }) {
             description.
           </p>
         )}
+      </div>
+
+      {/* Location breakdown */}
+      <div>
+        <h3 className="text-xs uppercase tracking-wide text-muted mb-2">
+          By location
+        </h3>
+        <StatLine label="Remote" value={stats.location_remote_count} />
+        {countryEntries.length === 0 && stats.location_remote_count === 0 && (
+          <div className="text-muted text-xs">No jobs yet.</div>
+        )}
+        {countryEntries.map(([country, n]) => (
+          <StatLine key={country} label={country} value={n} />
+        ))}
+        <StatLine
+          label="Unresolved"
+          value={stats.location_null_count}
+          muted
+        />
       </div>
     </div>
   );

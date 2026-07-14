@@ -5,6 +5,7 @@ import type { DB } from '../../services/db';
 import { JobsRepo, isJobStatus, type JobStatus, type ListJobsOptions } from './repo';
 import { TagsRepo } from './repo-tags';
 import { computeFitScore } from './fit-scorer';
+import { parseLocation } from '../scraper/location-parser';
 import { requireRole } from '../../middleware/requireRole';
 import { bus } from '../../services/sse/bus';
 
@@ -37,10 +38,23 @@ export function buildJobsRouter(ctx: AppContext): Router {
     return Number.isFinite(n) ? n : undefined;
   }
 
+  function parseCommaList(raw: unknown): string[] | undefined {
+    if (typeof raw !== 'string' || !raw.trim()) return undefined;
+    const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    return parts.length > 0 ? parts : undefined;
+  }
+
+  function parseBoolOpt(raw: unknown): boolean | undefined {
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    return undefined;
+  }
+
   // GET /api/jobs
   router.get('/', (req, res) => {
     const userId = req.user!.username;
     const applyKeywordFilter = req.query.filter !== 'off';
+    const applyLocationFilter = req.query.location_filter !== 'off';
     const profileId = parseNumberOpt(req.query.profile_id);
 
     const rawSort = req.query.sort;
@@ -58,6 +72,24 @@ export function buildJobsRouter(ctx: AppContext): Router {
       };
     }
 
+    // Resolve location filter the same way, with query params overriding
+    // the profile's stored values for this request only (mirrors ?filter=
+    // for keywords: params win when present, profile otherwise).
+    let locationFilter: ListJobsOptions['locationFilter'];
+    if (applyLocationFilter) {
+      const profileLoc = resolveProfileLocationFilter(ctx.db, userId, profileId);
+      const countriesParam = parseCommaList(req.query.countries);
+      const statesParam = parseCommaList(req.query.states);
+      const includeRemoteParam = parseBoolOpt(req.query.include_remote);
+      const includeNullParam = parseBoolOpt(req.query.include_null_location);
+      locationFilter = {
+        allowedCountries: countriesParam ?? profileLoc.allowedCountries,
+        allowedStates: statesParam ?? profileLoc.allowedStates,
+        includeRemote: includeRemoteParam ?? profileLoc.includeRemote,
+        includeNullLocation: includeNullParam ?? profileLoc.includeNullLocation,
+      };
+    }
+
     const opts: ListJobsOptions = {
       userId,
       statuses: parseStatuses(req.query.status),
@@ -72,6 +104,8 @@ export function buildJobsRouter(ctx: AppContext): Router {
       sortBy,
       applyKeywordFilter,
       keywordFilter,
+      applyLocationFilter,
+      locationFilter,
     };
 
     if (!opts.statuses && req.query.status !== 'all') {
@@ -187,6 +221,7 @@ export function buildJobsRouter(ctx: AppContext): Router {
     const fit = computeFitScore({ title, description }, signals, excludes);
     const externalId = randomUUID();
     const descriptionHash = createHash('sha256').update(description).digest('hex');
+    const parsedLocation = parseLocation(location, remoteType);
 
     const job = jobs.insertManual({
       source_id: manualSource.id,
@@ -202,6 +237,9 @@ export function buildJobsRouter(ctx: AppContext): Router {
       fit_score: fit.score,
       fit_reasons: JSON.stringify(fit.reasons),
       user_id: userId,
+      location_country: parsedLocation.country,
+      location_state: parsedLocation.state,
+      location_city: parsedLocation.city,
     });
 
     bus.publish('job.discovered', {
@@ -419,6 +457,64 @@ function resolveProfileKeywords(
   return {
     include: row.target_keywords ? (JSON.parse(row.target_keywords) as string[]) : [],
     exclude: row.excluded_keywords ? (JSON.parse(row.excluded_keywords) as string[]) : [],
+  };
+}
+
+type LocationFilter = {
+  allowedCountries: string[] | null;
+  allowedStates: string[] | null;
+  includeRemote: boolean;
+  includeNullLocation: boolean;
+};
+type ProfileLocationRow = {
+  allowed_countries: string | null;
+  allowed_states: string | null;
+  include_remote: number;
+  include_null_location: number;
+};
+
+// Permissive defaults so nothing is excluded before a profile is configured
+// (and before profiles_002_location_filter has run on a fresh deploy).
+const PERMISSIVE_LOCATION_FILTER: LocationFilter = {
+  allowedCountries: null,
+  allowedStates: null,
+  includeRemote: true,
+  includeNullLocation: true,
+};
+
+/**
+ * Returns the location filter from the given profile (or the user's default
+ * profile when profileId is omitted). Falls back to permissive defaults if
+ * no profile row exists yet — same fallback shape resolveProfileKeywords
+ * uses config for, except location filtering has no config-file equivalent.
+ */
+function resolveProfileLocationFilter(
+  db: DB,
+  userId: string,
+  profileId: number | undefined,
+): LocationFilter {
+  const row = (
+    profileId !== undefined
+      ? db
+          .prepare(
+            `SELECT allowed_countries, allowed_states, include_remote, include_null_location
+             FROM profiles WHERE id = ? AND user_id = ?`,
+          )
+          .get(profileId, userId)
+      : db
+          .prepare(
+            `SELECT allowed_countries, allowed_states, include_remote, include_null_location
+             FROM profiles WHERE user_id = ? AND is_default = 1`,
+          )
+          .get(userId)
+  ) as ProfileLocationRow | undefined;
+
+  if (!row) return PERMISSIVE_LOCATION_FILTER;
+  return {
+    allowedCountries: row.allowed_countries ? (JSON.parse(row.allowed_countries) as string[]) : null,
+    allowedStates: row.allowed_states ? (JSON.parse(row.allowed_states) as string[]) : null,
+    includeRemote: row.include_remote === 1,
+    includeNullLocation: row.include_null_location === 1,
   };
 }
 

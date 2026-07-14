@@ -94,7 +94,8 @@ export type JobStatus =
   | 'generating'
   | 'ready'
   | 'applied'
-  | 'archived';
+  | 'archived'
+  | 'duplicate';
 
 export interface Job {
   id: number;
@@ -117,6 +118,9 @@ export interface Job {
   fit_reasons: string | null;
   status: JobStatus;
   dismissed_reason: string | null;
+  location_country: string | null;
+  location_state: string | null;
+  location_city: string | null;
 }
 
 export interface Tag {
@@ -176,6 +180,10 @@ export interface Profile {
   is_default: number; // 0 | 1
   created_at: string;
   updated_at: string;
+  allowed_countries: string | null; // JSON string[]; null = no restriction
+  allowed_states: string | null; // JSON string[]; null = no restriction
+  include_remote: number; // 0 | 1
+  include_null_location: number; // 0 | 1
 }
 
 export interface ProfilesListResponse {

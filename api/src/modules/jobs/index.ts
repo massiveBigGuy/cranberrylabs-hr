@@ -4,6 +4,7 @@ import { migrations } from './migrations';
 import { buildJobsRouter } from './router';
 import { JobsRepo } from './repo';
 import { computeFitScore } from './fit-scorer';
+import { parseLocation } from '../scraper/location-parser';
 
 /**
  * The `jobs` module — read/filter/tag/dismiss jobs that the scraper has
@@ -42,6 +43,19 @@ export const jobsModule: Module = {
         repo.updateFitScore(job.id, result.score, JSON.stringify(result.reasons));
       }
       ctx.logger.info('fit backfill: complete', { scored: unscored.length });
+    }
+
+    // Backfill location_country/state/city for jobs whose location was
+    // never parsed (new column added in scraper_005_location_parsed).
+    // Remote jobs are correctly excluded — see findNeedingLocationParse.
+    const needingLocation = repo.findNeedingLocationParse();
+    if (needingLocation.length > 0) {
+      ctx.logger.info('location backfill: starting', { count: needingLocation.length });
+      for (const job of needingLocation) {
+        const parsed = parseLocation(job.location, job.remote_type);
+        repo.updateLocation(job.id, parsed.country, parsed.state, parsed.city);
+      }
+      ctx.logger.info('location backfill: complete', { parsed: needingLocation.length });
     }
 
     ctx.logger.debug('jobs module initialized');

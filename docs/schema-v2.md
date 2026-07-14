@@ -45,6 +45,7 @@ Build-order progress:
 - [x] Step 10 — Retention (nightly sweep, pin/unpin, named policies)
 - [x] Step 11 — Polish (sources + profiles UI, scrape-run history, regenerate-with-feedback, version history, saved system prompts)
 - [x] Step 12 — ATS adapters: Greenhouse, Lever, Ashby
+- [x] Step 13 — Location filtering
 
 ---
 
@@ -210,11 +211,12 @@ CREATE TABLE sources (
 );
 ```
 
-### `jobs` — discovered postings [shipped, extended in 3.1 + 7.1]
+### `jobs` — discovered postings [shipped, extended in 3.1 + 7.1 + 13]
 
 Created in `scraper_001_jobs`. Two columns added in
 `scraper_003_detail_fetch_tracking` (step 3.1); `user_id` added in
-`scraper_004_user_id` (step 7.1).
+`scraper_004_user_id` (step 7.1); `location_country`/`location_state`/
+`location_city` added in `scraper_005_location_parsed` (step 13).
 
 `jobs` gets **no** `profile_id` column. A job's profile is derived
 through `source_id → sources.profile_id`. This keeps the derivation
@@ -247,6 +249,9 @@ CREATE TABLE jobs (
   detail_fetch_attempts INTEGER NOT NULL DEFAULT 0,  -- added scraper_003 (step 3.1)
   detail_fetch_status   TEXT    NOT NULL DEFAULT 'pending',  -- added scraper_003
   user_id         TEXT    NOT NULL,        -- added scraper_004 (step 7.1)
+  location_country TEXT,                   -- ISO 3166-1 alpha-2; added scraper_005 (step 13)
+  location_state   TEXT,                   -- ISO 3166-2 subdivision, no country prefix; added scraper_005
+  location_city    TEXT,                   -- added scraper_005
   UNIQUE(source_id, external_id)
 );
 
@@ -254,6 +259,7 @@ CREATE INDEX idx_jobs_status ON jobs(status);
 CREATE INDEX idx_jobs_posted ON jobs(posted_date);
 CREATE INDEX idx_jobs_fit ON jobs(fit_score DESC);
 CREATE INDEX idx_jobs_detail_fetch ON jobs(detail_fetch_status);
+CREATE INDEX idx_jobs_location ON jobs(location_country, location_state);
 ```
 
 Status values: `'new' | 'reviewing' | 'dismissed' | 'queued' |
@@ -295,7 +301,51 @@ overlap: whichever of a duplicate pair gets its hash computed *second*
 job) is the one that flips to `'duplicate'`, regardless of which
 platform or which order the sources were scraped in.
 
-### `profiles` — per-role-type bundle [shipped, step 7.2]
+### Location parsing [shipped, step 13]
+
+`location_country`/`location_state`/`location_city` are populated by
+`scraper/location-parser.ts`'s pure function `parseLocation(raw,
+remoteType)`, which parses the free-text `location` column into
+structured fields at insert time. Design reference:
+`docs/location-filtering-patch3.md`, with two corrections made during
+implementation (both confirmed with the user before building):
+
+- **Remote check is `remote_type === 'remote'` specifically**, not "any
+  non-null `remote_type`." The design doc's literal wording would have
+  also skipped parsing for `'onsite'`/`'hybrid'` postings — the majority
+  of scraped jobs — since `remote_type` is non-null for those too.
+  Onsite/hybrid postings have real addresses and get parsed normally;
+  only `'remote'` short-circuits to all-null. The same correction
+  applies to the `GET /api/jobs` PASS condition below and to the
+  `location_remote_count` stat.
+- **Parsing happens once, at insert time, in three places** — not "at
+  insert or during the detail sweep" as the design doc describes.
+  `location` and `remote_type` are already present in the listing
+  response for every adapter (only `description` is phase-2 for
+  Workday/Greenhouse) and never change afterward, so re-parsing during
+  the detail sweep would run on identical inputs. The three insertion
+  paths are: `scraper/repo-jobs.ts upsertMany` (the normal scrape path),
+  `jobs/router.ts POST /jobs/manual` → `JobsRepo.insertManual` (the
+  design doc didn't cover this path at all — manual entries would never
+  have gotten a parsed location without this), and a startup backfill in
+  `jobs/index.ts init` (`JobsRepo.findNeedingLocationParse` /
+  `updateLocation`) for rows inserted before this step shipped, mirroring
+  the existing fit-score backfill's inline, unbatched, once-per-boot
+  shape.
+
+Country detection covers US/CA/MX with full state/province tables (per
+the design doc) plus ~65 additional countries at country-only
+granularity (`scraper/location-data.ts`). A bare 2-letter country code
+(e.g. `"CA"`) only matches when it doesn't collide with a US state or
+Canadian province abbreviation — otherwise `"Ontario, CA"` would parse
+as Canada instead of Ontario, California, contradicting the design
+doc's own worked example. The collision exclusion set is computed from
+the state tables, not hand-picked. Token scanning is right-to-left
+(per the design doc's Step 3), which also fixes an ordering bug where
+`"New York, NY"` would otherwise consume the full state name `"New
+York"` as the state before ever reaching the abbreviation `"NY"`.
+
+### `profiles` — per-role-type bundle [shipped, step 7.2, extended step 13]
 
 Created in `profiles_001_init`. A profile bundles the three things
 that diverge when one user pursues more than one kind of role at once
@@ -314,11 +364,22 @@ CREATE TABLE profiles (
   is_default        INTEGER NOT NULL DEFAULT 0,    -- the profile sources fall back to
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+  allowed_countries      TEXT,                     -- JSON string[]; null = no restriction; added profiles_002 (step 13)
+  allowed_states         TEXT,                     -- JSON string[], mixed across countries; null = no restriction; added profiles_002
+  include_remote         INTEGER NOT NULL DEFAULT 1,  -- added profiles_002
+  include_null_location  INTEGER NOT NULL DEFAULT 1,  -- added profiles_002
   UNIQUE(user_id, name)
 );
 
 CREATE INDEX idx_profiles_user ON profiles(user_id);
 ```
+
+The four `profiles_002_location_filter` columns default permissively
+(no restriction, remote included, unresolvable-location included) so
+no existing job is newly excluded from any profile until the user
+actively configures a filter. See §17-adjacent "Location parsing"
+above for the parser and "Jobs" API section below for how these
+resolve into a `GET /api/jobs` query.
 
 Exactly one profile per user carries `is_default = 1`. The step 7.2
 migration creates it, seeds its keyword sets from the current
@@ -603,7 +664,7 @@ On create, `profile_id` defaults to the user's default profile when
 omitted (step 7.2), so existing source-creation clients keep working
 without change.
 
-### Jobs [shipped]
+### Jobs [shipped, extended step 13]
 
 ```
 GET    /api/jobs                     query params:
@@ -616,6 +677,11 @@ GET    /api/jobs                     query params:
                                        ?search=sysadmin
                                        ?limit=50&offset=0
                                        ?filter=off            (disable keyword filter)
+                                       ?countries=US,CA        (override profile, step 13)
+                                       ?states=MI,ON            (override profile, step 13)
+                                       ?include_remote=true|false      (override, step 13)
+                                       ?include_null_location=true|false (override, step 13)
+                                       ?location_filter=off    (disable location filter, step 13)
 GET    /api/jobs/stats               aggregate counts for diagnostic panel
 GET    /api/jobs/:id                 detail + tags (+ derived profile, 7.2)
 PATCH  /api/jobs/:id                 update status, dismissed_reason, hiring_manager
@@ -637,19 +703,47 @@ POST   /api/jobs/:id/refit           → recomputes fit_score for one job (uses 
 detail now includes the derived profile (resolved through
 `source_id`). The stats panel breakdown becomes per-profile aware.
 
+**[revised in step 13]** Location filter resolves from the job's
+profile the same way the keyword filter does — `?countries=`/
+`?states=`/`?include_remote=`/`?include_null_location=` override the
+profile for that request only when present; `?location_filter=off`
+bypasses the filter entirely (mirrors `?filter=off`). PASS condition
+(`jobs/repo.ts buildLocationFilterSql`):
+```
+(remote_type = 'remote' AND include_remote)
+OR (location_country IS NULL AND include_null_location)
+OR (
+  (allowed_countries unset OR location_country IN allowed_countries)
+  AND (allowed_states unset OR location_state IN allowed_states)
+)
+```
+`GET /api/jobs/stats` gains `by_location_country` (drives the
+frontend's country picker — only countries with at least one job
+appear), `location_remote_count`, `location_null_count`.
+
 Route ordering: `GET /stats` registers BEFORE `GET /:id` to prevent
 the `:id` wildcard from matching the literal string `stats`.
 
-### Profiles [shipped, step 7.2]
+### Profiles [shipped, step 7.2, extended step 13]
 
 ```
 GET    /api/profiles                 list current user's profiles (default first)
 POST   /api/profiles                 create { name, target_keywords?, excluded_keywords?, resume_version_id? }
 GET    /api/profiles/:id             detail + counts (sources, jobs, samples)
-PATCH  /api/profiles/:id             update name / keywords / resume_version_id / is_default
+PATCH  /api/profiles/:id             update name / keywords / resume_version_id / is_default /
+                                       allowed_countries / allowed_states /
+                                       include_remote / include_null_location (step 13)
 DELETE /api/profiles/:id             delete; refuses if it is the default or still has sources attached
 POST   /api/profiles/:id/refit       recompute fit_score for every job in this profile
 ```
+
+**[step 13]** `allowed_countries`/`allowed_states` accept a JSON string
+array or `null` (clears the restriction); `include_remote`/
+`include_null_location` accept a boolean and, unlike `is_default`, can
+be set to `false` as well as `true`. The Jobs page's location filter
+panel (`web/src/components/LocationFilterPanel.tsx`) PATCHes this
+endpoint live as the user checks/unchecks countries and states — see
+"Location parsing" above and §17.
 
 Permission model follows §16: `user`-and-above manage their own
 profiles; `viewer` is read-only. Setting `is_default = 1` on one
@@ -1160,6 +1254,15 @@ Annotated with current status:
     platform selector on `/sources`, and an insert-time cross-source
     dedup check for the two one-phase adapters (Lever, Ashby) that
     never reach the detail sweep. See §3 and §7.
+17. [x] **Step 13 — Location filtering.** Structured
+    `location_country`/`location_state`/`location_city` parsed from the
+    free-text `location` column at insert time
+    (`scraper/location-parser.ts`, design reference:
+    `docs/location-filtering-patch3.md`), full US/CA/MX state detection
+    plus ~65-country country-only coverage, per-profile
+    `allowed_countries`/`allowed_states`/`include_remote`/
+    `include_null_location` filter resolved into `GET /api/jobs`, and a
+    live-editing accordion panel on the Jobs page. See §3 and §7.
 
 ---
 
@@ -1749,6 +1852,24 @@ version files is the remaining open item (see §14).
 
 ## Document changelog
 
+- **v2.6** (step 13 shipped — location filtering) — Added
+  `location_country`/`location_state`/`location_city` to `jobs` (§3,
+  `scraper_005_location_parsed`) and `allowed_countries`/
+  `allowed_states`/`include_remote`/`include_null_location` to
+  `profiles` (§3, `profiles_002_location_filter`). Added the "Location
+  parsing" subsection documenting `scraper/location-parser.ts` and two
+  corrections made to the design reference
+  (`docs/location-filtering-patch3.md`) during implementation: the
+  remote short-circuit checks `remote_type === 'remote'` specifically
+  rather than any non-null value (the literal doc wording would have
+  also blocked onsite/hybrid postings — the majority of scraped jobs —
+  from ever getting a parsed location), and parsing happens once at
+  insert time across all three insertion paths (scrape upsert, manual
+  entry, startup backfill) rather than also re-running during the
+  detail sweep, since `location`/`remote_type` don't change after
+  insert. Updated the Jobs and Profiles API sections (§4) with the new
+  query params, PASS condition, and PATCH fields. Added build-order
+  step 13.
 - **v2.5** (step 12 shipped — ATS adapters) — Added Greenhouse, Lever,
   and Ashby adapters alongside Workday, per the design reference in
   `docs/update-1.md`. Extended §7 "Adapter pattern" with the

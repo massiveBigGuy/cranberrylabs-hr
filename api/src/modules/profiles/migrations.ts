@@ -21,4 +21,18 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    id: 'profiles_002_location_filter',
+    up: (db) => {
+      // allowed_countries/allowed_states null = no restriction (allow all).
+      // include_remote/include_null_location default to 1 so no existing
+      // job is newly excluded until the user configures the filter.
+      db.exec(`
+        ALTER TABLE profiles ADD COLUMN allowed_countries TEXT;
+        ALTER TABLE profiles ADD COLUMN allowed_states TEXT;
+        ALTER TABLE profiles ADD COLUMN include_remote INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE profiles ADD COLUMN include_null_location INTEGER NOT NULL DEFAULT 1;
+      `);
+    },
+  },
 ];

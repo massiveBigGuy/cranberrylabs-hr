@@ -7,6 +7,7 @@ import { JobDetailDrawer } from '../components/JobDetailDrawer';
 import { JobStatsPanel } from '../components/JobStatsPanel';
 import { AddJobModal } from '../components/AddJobModal';
 import { GenerateModal } from '../components/GenerateModal';
+import { LocationFilterPanel } from '../components/LocationFilterPanel';
 
 export function JobsPage() {
   const qc = useQueryClient();
@@ -28,6 +29,7 @@ export function JobsPage() {
     queryFn: ({ signal }) => api.get<ProfilesListResponse>('/api/profiles', signal),
   });
   const profiles = profilesQuery.data?.profiles ?? [];
+  const selectedProfile = profiles.find((p) => p.id === profileId) ?? null;
 
   const sinceIso =
     sinceDays === null
@@ -202,6 +204,7 @@ export function JobsPage() {
       )}
 
       <JobStatsPanel />
+      <LocationFilterPanel profile={selectedProfile} />
 
       {query.data && (
         <div className="text-xs text-muted mb-3">

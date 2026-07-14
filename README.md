@@ -10,7 +10,7 @@ behind Caddy + Authelia. Separate code, separate database, and
 separate Redis from `cranberrylabs-api` and `cranberrylabs-web`. The
 existing site links to it but shares nothing with it.
 
-## Current state — update 3 patch 2 complete
+## Current state — update 3 patch 3 complete
 
 The full pipeline is live: discover → fit-score → generate → review →
 iterate with feedback → submit (by hand). All nine modules are
@@ -55,6 +55,15 @@ through Authelia you have access to all pages described below.
   ingestion using the job's profile's keyword sets. `POST
   /api/jobs/:id/refit` recomputes one job; the list view sorts by fit
   descending by default (`?sort=fit`).
+- **Location filtering** — free-text `location` is parsed into
+  structured country/state/city at ingest (full US/Canada/Mexico
+  state-level detection, ~65 more countries at country level). Each
+  profile carries an allowed-countries/states filter plus separate
+  "include remote" and "include unresolvable location" toggles. The
+  Jobs page's location panel (continents → countries → states,
+  regions with no jobs simply don't appear) edits the active profile's
+  filter live. `?location_filter=off` bypasses it for diagnostics,
+  mirroring the keyword filter's `?filter=off`.
 - **Master resume + writing samples** — structured JSON resume with
   version history; writing samples for cover-letter voice calibration.
   Both are scoped per user and per profile.
@@ -174,6 +183,18 @@ through Authelia you have access to all pages described below.
   `/sources`. Closed a gap in the cross-source dedup patch where
   one-phase jobs never reached the sweep-side duplicate check — see
   `docs/schema-v2.md` §3.
+- [x] **Step 13 — Location filtering.** Free-text `location` parsed
+  into structured country/state/city at ingest (design reference:
+  `docs/location-filtering-patch3.md`), full US/Canada/Mexico
+  state-level detection plus ~65 more countries at country level, a
+  per-profile allowed-countries/states filter with separate
+  remote/unresolvable-location toggles, and a live-editing accordion
+  panel on the Jobs page. Fixed two gaps found in the design doc while
+  building it — the remote short-circuit only fires for
+  `remote_type = 'remote'` (not onsite/hybrid too), and parsing runs
+  once at insert time across all three insertion paths including
+  manual entry, which the design doc didn't cover. See
+  `docs/schema-v2.md` §3.
 
 
 ## Layout
@@ -185,13 +206,14 @@ cranberrylabs-hr/
 │   │   ├── modules/
 │   │   │   ├── sources/          source CRUD, scrape trigger
 │   │   │   ├── scraper/          Workday/Greenhouse/Lever/Ashby adapters,
-│   │   │   │                     queue worker, detail sweep
+│   │   │   │                     queue worker, detail sweep, location parser
 │   │   │   ├── jobs/             list, detail, status, tags, stats, fit-scorer
 │   │   │   ├── resume/           master resume + writing samples
 │   │   │   ├── applications/     generation queue, doc storage, versions,
 │   │   │   │                     saved system prompts
 │   │   │   ├── users/            registry, roles, requireRole
-│   │   │   ├── profiles/         per-role-type keyword + resume + voice bundles
+│   │   │   ├── profiles/         per-role-type keyword + resume + voice +
+│   │   │   │                     location-filter bundles
 │   │   │   ├── notifications/    browser push (Web Push API) + webhooks
 │   │   │   └── retention/        nightly sweep, pin/unpin, named policies
 │   │   ├── middleware/authelia.ts
@@ -207,9 +229,11 @@ cranberrylabs-hr/
 │   │   ├── pages/                JobsPage, ApplicationsPage, ResumePage,
 │   │   │                         SourcesPage, ProfilesPage, PromptsPage
 │   │   ├── components/           JobList, JobRow, JobDetailDrawer,
-│   │   │                         JobStatsPanel, GenerateModal, queue +
-│   │   │                         review + version-history UI
-│   │   └── lib/                  api client, SSE invalidator, push
+│   │   │                         JobStatsPanel, LocationFilterPanel,
+│   │   │                         GenerateModal, queue + review +
+│   │   │                         version-history UI
+│   │   └── lib/                  api client, SSE invalidator, push,
+│   │                             locations (continent/state UI data)
 │   └── package.json
 ├── config/
 │   ├── default.yaml
